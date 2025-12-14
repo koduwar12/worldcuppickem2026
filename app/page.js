@@ -36,8 +36,7 @@ export default function Home() {
 
   return (
     <main style={{ padding: 24 }}>
-      <h1>World Cup Pick’em 2026 (NEW)</h1>
-
+      <h1>World Cup Pick’em 2026</h1>
       {!user ? <Auth /> : <Dashboard user={user} />}
     </main>
   )
@@ -98,6 +97,13 @@ function Dashboard({ user }) {
     await supabase.auth.signOut()
   }
 
+  const linkStyle = {
+    padding: 10,
+    border: '1px solid #000',
+    textAlign: 'center',
+    textDecoration: 'none'
+  }
+
   return (
     <div style={{ marginTop: 16 }}>
       <p>Welcome! ⚽</p>
@@ -112,19 +118,19 @@ function Dashboard({ user }) {
           display: 'flex',
           flexDirection: 'column',
           gap: 12,
-          maxWidth: 240
+          maxWidth: 260
         }}
       >
-        <a
-          href="/picks"
-          style={{
-            padding: 10,
-            border: '1px solid #000',
-            textAlign: 'center',
-            textDecoration: 'none'
-          }}
-        >
+        <a href="/picks" style={linkStyle}>
           👉 Go to Group Picks
+        </a>
+
+        <a href="/standings" style={linkStyle}>
+          📊 View Standings
+        </a>
+
+        <a href="/admin" style={linkStyle}>
+          🛠 Admin: Enter Game Results
         </a>
 
         <button onClick={logout}>Log out</button>
