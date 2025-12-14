@@ -4,7 +4,7 @@ export const dynamic = 'force-dynamic'
 import { useEffect, useMemo, useState } from 'react'
 import { supabase } from '../../../lib/supabaseClient'
 
-export default function BracketView({ params }) {
+export default function BracketPage({ params }) {
   const userId = params.userId
 
   const [loading, setLoading] = useState(true)
@@ -21,18 +21,18 @@ export default function BracketView({ params }) {
       setLoading(true)
       setMsg('')
 
-      // Require sign-in (keeps it friends/family only)
-      const { data: userData } = await supabase.auth.getUser()
-      const u = userData?.user ?? null
+      // Require sign-in (friends & family only)
+      const { data: auth } = await supabase.auth.getUser()
+      const u = auth?.user ?? null
       setViewer(u)
 
       if (!u) {
-        setMsg('Please sign in first.')
+        setMsg('Please sign in to view brackets.')
         setLoading(false)
         return
       }
 
-      // Load submitted profile (display name)
+      // Load submitted profile
       const profRes = await supabase
         .from('profiles')
         .select('user_id, display_name, submitted_at, bracket_submitted')
@@ -53,8 +53,8 @@ export default function BracketView({ params }) {
 
       setProfile(profRes.data)
 
-      // Load groups + teams + this user's submitted picks
-      const [gRes, tRes, picksRes] = await Promise.all([
+      // Load groups, teams, and this user's submitted picks
+      const [gRes, tRes, pRes] = await Promise.all([
         supabase.from('groups').select('*').order('id'),
         supabase.from('teams').select('*').order('name'),
         supabase
@@ -63,21 +63,20 @@ export default function BracketView({ params }) {
           .eq('user_id', userId)
       ])
 
-      if (gRes.error || tRes.error || picksRes.error) {
+      if (gRes.error || tRes.error || pRes.error) {
         setMsg(
           gRes.error?.message ||
             tRes.error?.message ||
-            picksRes.error?.message ||
-            'Error loading bracket'
+            pRes.error?.message ||
+            'Failed to load bracket'
         )
         setLoading(false)
         return
       }
 
-      // group_picks policy already ensures only submitted picks are readable by others
       setGroups(gRes.data ?? [])
       setTeams(tRes.data ?? [])
-      setPicks(picksRes.data ?? [])
+      setPicks(pRes.data ?? [])
 
       setLoading(false)
     })()
@@ -99,7 +98,10 @@ export default function BracketView({ params }) {
   }, [picks])
 
   function posLabel(pos) {
-    return pos === 1 ? '1st' : pos === 2 ? '2nd' : pos === 3 ? '3rd' : '4th'
+    if (pos === 1) return '1st'
+    if (pos === 2) return '2nd'
+    if (pos === 3) return '3rd'
+    return '4th'
   }
 
   if (loading) {
@@ -114,11 +116,11 @@ export default function BracketView({ params }) {
   if (msg) {
     return (
       <main style={{ padding: 24 }}>
-        <div style={{ display: 'flex', gap: 14, marginBottom: 14 }}>
-          <a href="/">Home</a>
-          <a href="/leaderboard">Leaderboard</a>
+        <nav style={{ marginBottom: 14 }}>
+          <a href="/">Home</a> ·{' '}
+          <a href="/leaderboard">Leaderboard</a> ·{' '}
           <a href="/standings">Standings</a>
-        </div>
+        </nav>
 
         <h1>Bracket</h1>
         <p>{msg}</p>
@@ -126,37 +128,48 @@ export default function BracketView({ params }) {
     )
   }
 
-  const name =
-    (profile?.display_name && profile.display_name.trim()) ||
+  const displayName =
+    (profile.display_name && profile.display_name.trim()) ||
     `User ${String(profile.user_id).slice(0, 6)}`
 
   return (
     <main style={{ padding: 24 }}>
-      <div style={{ display: 'flex', gap: 14, marginBottom: 14 }}>
-        <a href="/">Home</a>
-        <a href="/leaderboard">Leaderboard</a>
+      <nav style={{ marginBottom: 14 }}>
+        <a href="/">Home</a> ·{' '}
+        <a href="/leaderboard">Leaderboard</a> ·{' '}
         <a href="/standings">Standings</a>
-      </div>
+      </nav>
 
-      <h1>{name} — Group Picks</h1>
+      <h1>{displayName} — Group Stage Bracket</h1>
+
       <p style={{ fontSize: 12, opacity: 0.75 }}>
         Submitted:{' '}
-        {profile.submitted_at ? new Date(profile.submitted_at).toLocaleString() : '—'}
+        {profile.submitted_at
+          ? new Date(profile.submitted_at).toLocaleString()
+          : '—'}
       </p>
 
       {groups.map(g => {
         const gp = picksByGroup[g.id] ?? {}
+
         return (
           <section
             key={g.id}
-            style={{ marginTop: 18, padding: 14, border: '1px solid #ddd', maxWidth: 560 }}
+            style={{
+              marginTop: 18,
+              padding: 14,
+              border: '1px solid #ddd',
+              maxWidth: 520
+            }}
           >
             <h2 style={{ marginTop: 0 }}>{g.name}</h2>
 
             {[1, 2, 3, 4].map(pos => (
               <div key={pos} style={{ marginTop: 8 }}>
                 <strong>{posLabel(pos)}:</strong>{' '}
-                {gp[pos] ? teamNameById[gp[pos]] : <span style={{ opacity: 0.7 }}>—</span>}
+                {gp[pos]
+                  ? teamNameById[gp[pos]]
+                  : <span style={{ opacity: 0.6 }}>—</span>}
               </div>
             ))}
           </section>
