@@ -8,13 +8,11 @@ export default function Home() {
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    // Initial session check
     supabase.auth.getUser().then(({ data }) => {
       setUser(data?.user ?? null)
       setLoading(false)
     })
 
-    // Listen for auth changes
     const { data: listener } = supabase.auth.onAuthStateChange(
       (_event, session) => {
         setUser(session?.user ?? null)
@@ -42,8 +40,6 @@ export default function Home() {
   )
 }
 
-/* ---------- AUTH ---------- */
-
 function Auth() {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
@@ -55,10 +51,7 @@ function Auth() {
   }
 
   async function signIn() {
-    const { error } = await supabase.auth.signInWithPassword({
-      email,
-      password
-    })
+    const { error } = await supabase.auth.signInWithPassword({ email, password })
     setMsg(error ? error.message : '')
   }
 
@@ -90,8 +83,6 @@ function Auth() {
   )
 }
 
-/* ---------- DASHBOARD ---------- */
-
 function Dashboard({ user }) {
   async function logout() {
     await supabase.auth.signOut()
@@ -107,7 +98,6 @@ function Dashboard({ user }) {
   return (
     <div style={{ marginTop: 16 }}>
       <p>Welcome! ⚽</p>
-
       <p style={{ fontSize: 12, opacity: 0.7 }}>
         Logged in as {user.email}
       </p>
@@ -121,17 +111,10 @@ function Dashboard({ user }) {
           maxWidth: 260
         }}
       >
-        <a href="/picks" style={linkStyle}>
-          👉 Go to Group Picks
-        </a>
-
-        <a href="/standings" style={linkStyle}>
-          📊 View Standings
-        </a>
-
-        <a href="/admin" style={linkStyle}>
-          🛠 Admin: Enter Game Results
-        </a>
+        <a href="/picks" style={linkStyle}>👉 Go to Group Picks</a>
+        <a href="/standings" style={linkStyle}>📊 View Standings</a>
+        <a href="/leaderboard" style={linkStyle}>🏆 View Leaderboard</a>
+        <a href="/admin" style={linkStyle}>🛠 Admin: Enter Game Results</a>
 
         <button onClick={logout}>Log out</button>
       </div>
