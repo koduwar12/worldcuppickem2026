@@ -14,7 +14,7 @@ export default function Home() {
       setLoading(false)
     })
 
-    // Listen for login/logout
+    // Listen for auth changes
     const { data: listener } = supabase.auth.onAuthStateChange(
       (_event, session) => {
         setUser(session?.user ?? null)
@@ -36,7 +36,8 @@ export default function Home() {
 
   return (
     <main style={{ padding: 24 }}>
-      <h1>World Cup Pick’em 2026</h1>
+      <h1>World Cup Pick’em 2026 (NEW)</h1>
+
       {!user ? <Auth /> : <Dashboard user={user} />}
     </main>
   )
@@ -51,7 +52,7 @@ function Auth() {
 
   async function signUp() {
     const { error } = await supabase.auth.signUp({ email, password })
-    setMsg(error ? error.message : 'Account created — you can now sign in')
+    setMsg(error ? error.message : 'Account created — you can sign in')
   }
 
   async function signIn() {
@@ -100,12 +101,32 @@ function Dashboard({ user }) {
   return (
     <div style={{ marginTop: 16 }}>
       <p>Welcome! ⚽</p>
+
       <p style={{ fontSize: 12, opacity: 0.7 }}>
         Logged in as {user.email}
       </p>
 
-      <div style={{ marginTop: 12, display: 'flex', gap: 12 }}>
-        <a href="/picks">Go to Group Picks</a>
+      <div
+        style={{
+          marginTop: 16,
+          display: 'flex',
+          flexDirection: 'column',
+          gap: 12,
+          maxWidth: 240
+        }}
+      >
+        <a
+          href="/picks"
+          style={{
+            padding: 10,
+            border: '1px solid #000',
+            textAlign: 'center',
+            textDecoration: 'none'
+          }}
+        >
+          👉 Go to Group Picks
+        </a>
+
         <button onClick={logout}>Log out</button>
       </div>
     </div>
