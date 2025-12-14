@@ -52,7 +52,6 @@ export default function AdminPage() {
       .select(`
         id,
         group_id,
-        kickoff_at,
         home_score,
         away_score,
         is_final,
@@ -69,7 +68,7 @@ export default function AdminPage() {
     const rows = data ?? []
     setMatches(rows)
 
-    // Initialize draft scores once (so inputs are controlled and stable)
+    // Initialize controlled inputs from DB values
     const initialDraft = {}
     for (const m of rows) {
       initialDraft[m.id] = {
@@ -81,7 +80,6 @@ export default function AdminPage() {
   }
 
   function setDraft(matchId, side, value) {
-    // allow empty string, digits only
     if (value !== '' && !/^\d+$/.test(value)) return
     setDraftScores(prev => ({
       ...prev,
@@ -112,30 +110,29 @@ export default function AdminPage() {
       .eq('id', matchId)
 
     if (error) {
-      setMsg(error.message)
+      setMsg(`Save failed: ${error.message}`)
       return
     }
 
-    // Update local list without reloading everything (prevents jumping)
+    // Update local state only (no jump)
     setMatches(prev =>
       prev.map(m =>
         m.id === matchId ? { ...m, home_score: homeVal, away_score: awayVal } : m
       )
     )
 
-    setMsg('Saved ✅')
+    setMsg('Saved ✅ (Scores are stored, but standings uses FINALIZED matches.)')
   }
 
   async function finalizeMatch(matchId) {
-    const m = matches.find(x => x.id === matchId)
-    if (!m) return
-
-    // require both scores before finalizing
     const draft = draftScores[matchId] ?? { home: '', away: '' }
     if (draft.home === '' || draft.away === '') {
-      setMsg('Enter both scores before finalizing.')
+      setMsg('Enter BOTH scores, click Save, then Finalize.')
       return
     }
+
+    // Make sure scores are saved before finalizing
+    await saveMatch(matchId)
 
     setMsg('Finalizing...')
     const { error } = await supabase
@@ -144,7 +141,7 @@ export default function AdminPage() {
       .eq('id', matchId)
 
     if (error) {
-      setMsg(error.message)
+      setMsg(`Finalize failed: ${error.message}`)
       return
     }
 
@@ -152,7 +149,7 @@ export default function AdminPage() {
       prev.map(x => (x.id === matchId ? { ...x, is_final: true } : x))
     )
 
-    setMsg('Finalized ✅')
+    setMsg('Finalized ✅ (Now standings will update.)')
   }
 
   async function unfinalizeMatch(matchId) {
@@ -163,7 +160,7 @@ export default function AdminPage() {
       .eq('id', matchId)
 
     if (error) {
-      setMsg(error.message)
+      setMsg(`Unfinalize failed: ${error.message}`)
       return
     }
 
@@ -188,14 +185,28 @@ export default function AdminPage() {
       <main style={{ padding: 24 }}>
         <h1>Admin</h1>
         <p>{msg}</p>
+        <p><a href="/">← Back to Home</a></p>
       </main>
     )
   }
 
   return (
     <main style={{ padding: 24 }}>
+      {/* NAV */}
+      <div style={{ display: 'flex', gap: 14, marginBottom: 14 }}>
+        <a href="/">Home</a>
+        <a href="/picks">Picks</a>
+        <a href="/standings">Standings</a>
+        <button onClick={loadMatches}>Refresh</button>
+      </div>
+
       <h1>Admin — Enter Match Results</h1>
-      {msg && <p style={{ marginTop: 8 }}>{msg}</p>}
+
+      <p style={{ fontSize: 12, opacity: 0.75, marginTop: 6 }}>
+        Important: typing does not auto-save. Click <strong>Save</strong>. Standings update only after <strong>Finalize</strong>.
+      </p>
+
+      {msg && <p style={{ marginTop: 10 }}>{msg}</p>}
 
       {Object.keys(grouped).sort().map(groupId => (
         <section key={groupId} style={{ marginTop: 18 }}>
@@ -255,10 +266,6 @@ export default function AdminPage() {
                     <button onClick={() => unfinalizeMatch(m.id)}>Unfinalize</button>
                   )}
                 </div>
-
-                <p style={{ fontSize: 12, opacity: 0.7, marginTop: 8 }}>
-                  Tip: type scores (no jumping), click Save, then Finalize.
-                </p>
               </div>
             )
           })}
