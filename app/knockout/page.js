@@ -2,21 +2,21 @@
 export const dynamic = 'force-dynamic'
 
 import { useEffect, useMemo, useState } from 'react'
-import { supabase } from '../../../lib/supabaseClient'
+import { supabase } from '../../lib/supabaseClient'
 
 const ROUND_ORDER = ['R32', 'R16', 'QF', 'SF', 'F']
 
-export default function AdminKnockoutPage() {
+export default function KnockoutPicksPage() {
   const [loading, setLoading] = useState(true)
   const [msg, setMsg] = useState('')
   const [user, setUser] = useState(null)
-  const [isAdmin, setIsAdmin] = useState(false)
 
-  const [teams, setTeams] = useState([])
   const [matches, setMatches] = useState([])
+  const [picks, setPicks] = useState([])
 
-  // local drafts for scores
-  const [draftScores, setDraftScores] = useState({}) // matchId -> {home:'', away:''}
+  // selections[matchId] = teamId
+  const [selections, setSelections] = useState({})
+  const [submittedAt, setSubmittedAt] = useState(null)
 
   useEffect(() => {
     ;(async () => {
@@ -33,59 +33,42 @@ export default function AdminKnockoutPage() {
         return
       }
 
-      const { data: adminRow, error: adminErr } = await supabase
-        .from('admin_emails')
-        .select('email')
-        .eq('email', u.email)
-        .maybeSingle()
-
-      if (adminErr) {
-        setMsg(adminErr.message)
-        setLoading(false)
-        return
-      }
-
-      if (!adminRow) {
-        setMsg('Not authorized (admin only).')
-        setLoading(false)
-        return
-      }
-
-      setIsAdmin(true)
-
-      const [tRes, mRes] = await Promise.all([
-        supabase.from('teams').select('id,name,group_id').order('name'),
+      const [mRes, pRes] = await Promise.all([
         supabase
           .from('knockout_matches')
           .select(`
-            id, round, match_no, home_team_id, away_team_id,
-            home_score, away_score, is_final, winner_team_id,
+            id, round, match_no, is_final, winner_team_id,
             home:home_team_id ( id, name ),
-            away:away_team_id ( id, name ),
-            winner:winner_team_id ( id, name )
+            away:away_team_id ( id, name )
           `)
           .order('round', { ascending: true })
-          .order('match_no', { ascending: true })
+          .order('match_no', { ascending: true }),
+        supabase
+          .from('knockout_picks')
+          .select('match_id, picked_winner_team_id, submitted_at')
+          .eq('user_id', u.id)
       ])
 
-      if (tRes.error || mRes.error) {
-        setMsg(tRes.error?.message || mRes.error?.message || 'Error loading')
+      if (mRes.error || pRes.error) {
+        setMsg(mRes.error?.message || pRes.error?.message || 'Error loading knockout')
         setLoading(false)
         return
       }
 
-      setTeams(tRes.data ?? [])
-      const rows = mRes.data ?? []
-      setMatches(rows)
+      const ms = mRes.data ?? []
+      const ps = pRes.data ?? []
 
-      const init = {}
-      for (const m of rows) {
-        init[m.id] = {
-          home: m.home_score === null || m.home_score === undefined ? '' : String(m.home_score),
-          away: m.away_score === null || m.away_score === undefined ? '' : String(m.away_score)
-        }
+      setMatches(ms)
+      setPicks(ps)
+
+      const seed = {}
+      let sub = null
+      for (const p of ps) {
+        seed[p.match_id] = p.picked_winner_team_id
+        if (p.submitted_at) sub = p.submitted_at
       }
-      setDraftScores(init)
+      setSelections(seed)
+      setSubmittedAt(sub)
 
       setLoading(false)
     })()
@@ -101,86 +84,67 @@ export default function AdminKnockoutPage() {
     return map
   }, [matches])
 
-  function setDraft(matchId, side, value) {
-    if (value !== '' && !/^\d+$/.test(value)) return
-    setDraftScores(prev => ({
-      ...prev,
-      [matchId]: { ...(prev[matchId] ?? { home: '', away: '' }), [side]: value }
+  const locked = !!submittedAt
+
+  async function saveDraft() {
+    if (!user) return
+    if (locked) {
+      setMsg('Submitted and locked.')
+      return
+    }
+
+    setMsg('Saving...')
+    const rows = Object.entries(selections).map(([matchId, teamId]) => ({
+      user_id: user.id,
+      match_id: Number(matchId),
+      picked_winner_team_id: Number(teamId),
+      submitted_at: null
     }))
+
+    const { error } = await supabase.from('knockout_picks').upsert(rows)
+    setMsg(error ? error.message : 'Draft saved ✅')
   }
 
-  async function updateMatch(matchId, patch) {
-    setMsg('Saving...')
-    const { error, data } = await supabase
-      .from('knockout_matches')
-      .update(patch)
-      .eq('id', matchId)
-      .select(`
-        id, round, match_no, home_team_id, away_team_id,
-        home_score, away_score, is_final, winner_team_id,
-        home:home_team_id ( id, name ),
-        away:away_team_id ( id, name ),
-        winner:winner_team_id ( id, name )
-      `)
-      .single()
+  async function submit() {
+    if (!user) return
+    if (locked) return
 
+    // Require picks only for matches that have both teams set
+    const required = matches.filter(m => m.home?.id && m.away?.id)
+    const missing = required.filter(m => !selections[m.id])
+    if (missing.length > 0) {
+      setMsg('Pick a winner for every posted knockout match before submitting.')
+      return
+    }
+
+    const now = new Date().toISOString()
+    setMsg('Submitting...')
+
+    const rows = required.map(m => ({
+      user_id: user.id,
+      match_id: m.id,
+      picked_winner_team_id: Number(selections[m.id]),
+      submitted_at: now
+    }))
+
+    const { error } = await supabase.from('knockout_picks').upsert(rows)
     if (error) {
       setMsg(error.message)
       return
     }
 
-    setMatches(prev => prev.map(m => (m.id === matchId ? data : m)))
-    setMsg('Saved ✅')
-  }
-
-  async function saveScores(matchId) {
-    const d = draftScores[matchId] ?? { home: '', away: '' }
-    const homeVal = d.home === '' ? null : Number(d.home)
-    const awayVal = d.away === '' ? null : Number(d.away)
-
-    await updateMatch(matchId, { home_score: homeVal, away_score: awayVal })
-  }
-
-  async function finalize(matchId) {
-    const m = matches.find(x => x.id === matchId)
-    const d = draftScores[matchId] ?? { home: '', away: '' }
-    if (!m?.home_team_id || !m?.away_team_id) {
-      setMsg('Set both teams before finalizing.')
-      return
-    }
-    if (d.home === '' || d.away === '') {
-      setMsg('Enter both scores before finalizing.')
-      return
-    }
-    if (Number(d.home) === Number(d.away)) {
-      setMsg('Knockout games cannot end in a draw. Use a winner score.')
-      return
-    }
-
-    // Save scores first
-    await saveScores(matchId)
-
-    const winnerId = Number(d.home) > Number(d.away) ? m.home_team_id : m.away_team_id
-    await updateMatch(matchId, { is_final: true, winner_team_id: winnerId })
-  }
-
-  async function unfinalize(matchId) {
-    await updateMatch(matchId, { is_final: false, winner_team_id: null })
+    setSubmittedAt(now)
+    setMsg('Submitted ✅ (locked)')
   }
 
   if (loading) {
     return <main style={{ padding: 24 }}><p>Loading...</p></main>
   }
 
-  if (!user || !isAdmin) {
+  if (msg && !user) {
     return (
       <main style={{ padding: 24 }}>
-        <div style={{ display: 'flex', gap: 14, marginBottom: 14 }}>
-          <a href="/">Home</a>
-          <a href="/leaderboard">Leaderboard</a>
-        </div>
-        <h1>Admin Knockout</h1>
-        <p>{msg || 'Not authorized.'}</p>
+        <p>{msg}</p>
       </main>
     )
   }
@@ -189,91 +153,79 @@ export default function AdminKnockoutPage() {
     <main style={{ padding: 24 }}>
       <div style={{ display: 'flex', gap: 14, marginBottom: 14 }}>
         <a href="/">Home</a>
-        <a href="/standings">Standings</a>
         <a href="/leaderboard">Leaderboard</a>
-        <a href="/knockout">Knockout Picks</a>
+        <a href="/standings">Standings</a>
       </div>
 
-      <h1>Admin — Knockout Bracket</h1>
+      <h1>Knockout Picks</h1>
+
+      {locked ? (
+        <p style={{ padding: 10, background: '#f2f2f2' }}>
+          Submitted on {new Date(submittedAt).toLocaleString()} — locked 🔒
+        </p>
+      ) : (
+        <p style={{ padding: 10, background: '#f2f2f2' }}>
+          Pick winners for the posted matches. Save drafts anytime. Submit locks.
+        </p>
+      )}
+
       {msg && <p>{msg}</p>}
 
       {ROUND_ORDER.map(r => (
-        <section key={r} style={{ marginTop: 18 }}>
-          <h2>{r}</h2>
+        <section key={r} style={{ marginTop: 18, padding: 14, border: '1px solid #ddd', maxWidth: 720 }}>
+          <h2 style={{ marginTop: 0 }}>{r}</h2>
 
           {(matchesByRound[r] ?? []).map(m => {
-            const d = draftScores[m.id] ?? { home: '', away: '' }
+            const home = m.home
+            const away = m.away
+            const canPick = home?.id && away?.id
 
             return (
-              <div key={m.id} style={{ border: '1px solid #ddd', padding: 12, marginTop: 10, maxWidth: 720 }}>
+              <div key={m.id} style={{ marginTop: 10, padding: 12, border: '1px solid #eee' }}>
                 <div style={{ fontSize: 12, opacity: 0.7 }}>
-                  Match {m.match_no} {m.is_final ? '• FINAL ✅' : ''}
+                  Match {m.match_no} {m.is_final ? '• Final ✅' : ''}
                 </div>
 
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 90px 90px 1fr', gap: 10, alignItems: 'center', marginTop: 10 }}>
+                <div style={{ marginTop: 6, fontWeight: 600 }}>
+                  {home?.name ?? 'TBD'} vs {away?.name ?? 'TBD'}
+                </div>
+
+                <div style={{ marginTop: 10 }}>
                   <select
-                    disabled={m.is_final}
-                    value={m.home_team_id ?? ''}
-                    onChange={e => updateMatch(m.id, { home_team_id: e.target.value ? Number(e.target.value) : null })}
-                    style={{ padding: 8 }}
+                    disabled={locked || !canPick}
+                    value={selections[m.id] ?? ''}
+                    onChange={e =>
+                      setSelections(prev => ({ ...prev, [m.id]: e.target.value }))
+                    }
+                    style={{ padding: 8, width: '100%', maxWidth: 420 }}
                   >
-                    <option value="">Home team…</option>
-                    {teams.map(t => (
-                      <option key={t.id} value={t.id}>{t.name}</option>
-                    ))}
-                  </select>
-
-                  <input
-                    type="text"
-                    inputMode="numeric"
-                    placeholder="Home"
-                    value={d.home}
-                    disabled={m.is_final}
-                    onChange={e => setDraft(m.id, 'home', e.target.value)}
-                    style={{ padding: 8 }}
-                  />
-
-                  <input
-                    type="text"
-                    inputMode="numeric"
-                    placeholder="Away"
-                    value={d.away}
-                    disabled={m.is_final}
-                    onChange={e => setDraft(m.id, 'away', e.target.value)}
-                    style={{ padding: 8 }}
-                  />
-
-                  <select
-                    disabled={m.is_final}
-                    value={m.away_team_id ?? ''}
-                    onChange={e => updateMatch(m.id, { away_team_id: e.target.value ? Number(e.target.value) : null })}
-                    style={{ padding: 8 }}
-                  >
-                    <option value="">Away team…</option>
-                    {teams.map(t => (
-                      <option key={t.id} value={t.id}>{t.name}</option>
-                    ))}
+                    <option value="">
+                      {canPick ? 'Select winner…' : 'Teams not set yet'}
+                    </option>
+                    {canPick && (
+                      <>
+                        <option value={home.id}>{home.name}</option>
+                        <option value={away.id}>{away.name}</option>
+                      </>
+                    )}
                   </select>
                 </div>
 
-                <div style={{ display: 'flex', gap: 10, marginTop: 12, alignItems: 'center' }}>
-                  <button disabled={m.is_final} onClick={() => saveScores(m.id)}>Save Scores</button>
-                  {!m.is_final ? (
-                    <button onClick={() => finalize(m.id)}>Finalize (sets winner)</button>
-                  ) : (
-                    <button onClick={() => unfinalize(m.id)}>Unfinalize</button>
-                  )}
-                  {m.winner?.name && (
-                    <span style={{ fontSize: 12, opacity: 0.8 }}>
-                      Winner: <strong>{m.winner.name}</strong>
-                    </span>
-                  )}
-                </div>
+                {m.is_final && m.winner_team_id && (
+                  <div style={{ marginTop: 8, fontSize: 12, opacity: 0.8 }}>
+                    Actual winner: <strong>{m.winner_team_id === home?.id ? home?.name : away?.name}</strong>
+                  </div>
+                )}
               </div>
             )
           })}
         </section>
       ))}
+
+      <div style={{ marginTop: 18, display: 'flex', gap: 12 }}>
+        <button disabled={locked} onClick={saveDraft}>Save Draft</button>
+        <button disabled={locked} onClick={submit}>Submit Knockout Picks (Locks 🔒)</button>
+      </div>
     </main>
   )
 }
