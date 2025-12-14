@@ -115,9 +115,6 @@ function Dashboard({ user }) {
         <a href="/standings" style={linkStyle}>📊 View Standings</a>
         <a href="/leaderboard" style={linkStyle}>🏆 View Leaderboard</a>
 
-        <a href="/knockout" style={linkStyle}>🥊 Knockout Picks</a>
-        <a href="/admin/knockout" style={linkStyle}>🛠 Admin: Knockout Matches</a>
-
         <a href="/admin" style={linkStyle}>🛠 Admin: Group Match Results</a>
 
         <button onClick={logout}>Log out</button>
