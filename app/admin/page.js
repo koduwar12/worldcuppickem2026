@@ -1,13 +1,14 @@
 'use client'
 export const dynamic = 'force-dynamic'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { supabase } from '../../lib/supabaseClient'
 
 export default function AdminPage() {
   const [user, setUser] = useState(null)
   const [isAdmin, setIsAdmin] = useState(false)
   const [matches, setMatches] = useState([])
+  const [draftScores, setDraftScores] = useState({}) // { [matchId]: { home: '', away: '' } }
   const [msg, setMsg] = useState('Loading...')
 
   useEffect(() => {
@@ -21,7 +22,6 @@ export default function AdminPage() {
         return
       }
 
-      // Check admin allowlist in DB
       const { data: adminRow, error: adminErr } = await supabase
         .from('admin_emails')
         .select('email')
@@ -40,7 +40,6 @@ export default function AdminPage() {
       }
 
       setIsAdmin(true)
-
       await loadMatches()
       setMsg('')
     })()
@@ -67,18 +66,112 @@ export default function AdminPage() {
       return
     }
 
-    setMatches(data ?? [])
+    const rows = data ?? []
+    setMatches(rows)
+
+    // Initialize draft scores once (so inputs are controlled and stable)
+    const initialDraft = {}
+    for (const m of rows) {
+      initialDraft[m.id] = {
+        home: m.home_score === null || m.home_score === undefined ? '' : String(m.home_score),
+        away: m.away_score === null || m.away_score === undefined ? '' : String(m.away_score)
+      }
+    }
+    setDraftScores(initialDraft)
   }
 
-  async function updateMatch(id, patch) {
+  function setDraft(matchId, side, value) {
+    // allow empty string, digits only
+    if (value !== '' && !/^\d+$/.test(value)) return
+    setDraftScores(prev => ({
+      ...prev,
+      [matchId]: { ...(prev[matchId] ?? { home: '', away: '' }), [side]: value }
+    }))
+  }
+
+  const grouped = useMemo(() => {
+    const map = {}
+    for (const m of matches) {
+      const k = m.group_id ?? '-'
+      if (!map[k]) map[k] = []
+      map[k].push(m)
+    }
+    return map
+  }, [matches])
+
+  async function saveMatch(matchId) {
     setMsg('Saving...')
-    const { error } = await supabase.from('matches').update(patch).eq('id', id)
+    const draft = draftScores[matchId] ?? { home: '', away: '' }
+
+    const homeVal = draft.home === '' ? null : Number(draft.home)
+    const awayVal = draft.away === '' ? null : Number(draft.away)
+
+    const { error } = await supabase
+      .from('matches')
+      .update({ home_score: homeVal, away_score: awayVal })
+      .eq('id', matchId)
+
     if (error) {
       setMsg(error.message)
       return
     }
+
+    // Update local list without reloading everything (prevents jumping)
+    setMatches(prev =>
+      prev.map(m =>
+        m.id === matchId ? { ...m, home_score: homeVal, away_score: awayVal } : m
+      )
+    )
+
     setMsg('Saved ✅')
-    await loadMatches()
+  }
+
+  async function finalizeMatch(matchId) {
+    const m = matches.find(x => x.id === matchId)
+    if (!m) return
+
+    // require both scores before finalizing
+    const draft = draftScores[matchId] ?? { home: '', away: '' }
+    if (draft.home === '' || draft.away === '') {
+      setMsg('Enter both scores before finalizing.')
+      return
+    }
+
+    setMsg('Finalizing...')
+    const { error } = await supabase
+      .from('matches')
+      .update({ is_final: true })
+      .eq('id', matchId)
+
+    if (error) {
+      setMsg(error.message)
+      return
+    }
+
+    setMatches(prev =>
+      prev.map(x => (x.id === matchId ? { ...x, is_final: true } : x))
+    )
+
+    setMsg('Finalized ✅')
+  }
+
+  async function unfinalizeMatch(matchId) {
+    setMsg('Unfinalizing...')
+    const { error } = await supabase
+      .from('matches')
+      .update({ is_final: false })
+      .eq('id', matchId)
+
+    if (error) {
+      setMsg(error.message)
+      return
+    }
+
+    setMatches(prev =>
+      prev.map(x => (x.id === matchId ? { ...x, is_final: false } : x))
+    )
+
+    setMsg('Unfinalized ✅')
   }
 
   if (!user) {
@@ -102,69 +195,74 @@ export default function AdminPage() {
   return (
     <main style={{ padding: 24 }}>
       <h1>Admin — Enter Match Results</h1>
-      {msg && <p>{msg}</p>}
+      {msg && <p style={{ marginTop: 8 }}>{msg}</p>}
 
-      {matches.map(m => (
-        <div
-          key={m.id}
-          style={{
-            border: '1px solid #ddd',
-            padding: 12,
-            marginTop: 12,
-            maxWidth: 520
-          }}
-        >
-          <div style={{ fontSize: 12, opacity: 0.7 }}>
-            Group {m.group_id} {m.is_final ? '• FINAL' : ''}
-          </div>
+      {Object.keys(grouped).sort().map(groupId => (
+        <section key={groupId} style={{ marginTop: 18 }}>
+          <h2 style={{ marginBottom: 8 }}>
+            {groupId === '-' ? 'No Group' : `Group ${groupId}`}
+          </h2>
 
-          <div style={{ marginTop: 6, fontWeight: 600 }}>
-            {m.home?.name} vs {m.away?.name}
-          </div>
+          {grouped[groupId].map(m => {
+            const draft = draftScores[m.id] ?? { home: '', away: '' }
+            const canFinalize = draft.home !== '' && draft.away !== ''
 
-          <div style={{ display: 'flex', gap: 10, marginTop: 10 }}>
-            <input
-              type="number"
-              placeholder="Home"
-              defaultValue={m.home_score ?? ''}
-              disabled={m.is_final}
-              onBlur={e => {
-                const v = e.target.value === '' ? null : Number(e.target.value)
-                updateMatch(m.id, { home_score: v })
-              }}
-              style={{ width: 90, padding: 8 }}
-            />
+            return (
+              <div
+                key={m.id}
+                style={{
+                  border: '1px solid #ddd',
+                  padding: 12,
+                  marginTop: 10,
+                  maxWidth: 560
+                }}
+              >
+                <div style={{ fontWeight: 600 }}>
+                  {m.home?.name} vs {m.away?.name}
+                  {m.is_final ? ' ✅ (Final)' : ''}
+                </div>
 
-            <input
-              type="number"
-              placeholder="Away"
-              defaultValue={m.away_score ?? ''}
-              disabled={m.is_final}
-              onBlur={e => {
-                const v = e.target.value === '' ? null : Number(e.target.value)
-                updateMatch(m.id, { away_score: v })
-              }}
-              style={{ width: 90, padding: 8 }}
-            />
+                <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginTop: 10 }}>
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    placeholder="Home"
+                    value={draft.home}
+                    disabled={m.is_final}
+                    onChange={e => setDraft(m.id, 'home', e.target.value)}
+                    style={{ width: 90, padding: 8 }}
+                  />
 
-            <button
-              onClick={() => updateMatch(m.id, { is_final: true })}
-              disabled={m.is_final || m.home_score === null || m.away_score === null}
-            >
-              Finalize
-            </button>
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    placeholder="Away"
+                    value={draft.away}
+                    disabled={m.is_final}
+                    onChange={e => setDraft(m.id, 'away', e.target.value)}
+                    style={{ width: 90, padding: 8 }}
+                  />
 
-            {m.is_final && (
-              <button onClick={() => updateMatch(m.id, { is_final: false })}>
-                Unfinalize
-              </button>
-            )}
-          </div>
+                  <button disabled={m.is_final} onClick={() => saveMatch(m.id)}>
+                    Save
+                  </button>
 
-          <p style={{ fontSize: 12, opacity: 0.7, marginTop: 8 }}>
-            Tip: enter both scores, then click Finalize.
-          </p>
-        </div>
+                  {!m.is_final ? (
+                    <button disabled={!canFinalize} onClick={() => finalizeMatch(m.id)}>
+                      Finalize
+                    </button>
+                  ) : (
+                    <button onClick={() => unfinalizeMatch(m.id)}>Unfinalize</button>
+                  )}
+                </div>
+
+                <p style={{ fontSize: 12, opacity: 0.7, marginTop: 8 }}>
+                  Tip: type scores (no jumping), click Save, then Finalize.
+                </p>
+              </div>
+            )
+          })}
+        </section>
       ))}
     </main>
   )
