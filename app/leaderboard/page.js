@@ -37,7 +37,7 @@ export default function LeaderboardPage() {
         return
       }
 
-      // Make sure my profile exists (so I can set my display name)
+      // Ensure my profile exists (so I can set a display name)
       const profRes = await supabase
         .from('profiles')
         .select('*')
@@ -69,7 +69,6 @@ export default function LeaderboardPage() {
       setMyProfile(prof)
       setMyNameDraft(prof.display_name ?? '')
 
-      // Load everything needed for standings + leaderboard
       const [gRes, tRes, mRes, pRes, picksRes] = await Promise.all([
         supabase.from('groups').select('*').order('id'),
         supabase.from('teams').select('*').order('name'),
@@ -86,12 +85,10 @@ export default function LeaderboardPage() {
           `)
           .eq('stage', 'GROUP')
           .eq('is_final', true),
-        // submitted profiles (for display names)
         supabase
           .from('profiles')
           .select('user_id, display_name, submitted_at, bracket_submitted')
           .eq('bracket_submitted', true),
-        // submitted picks (policy allows only submitted rows)
         supabase
           .from('group_picks')
           .select('user_id, group_id, position, team_id, submitted_at')
@@ -120,7 +117,7 @@ export default function LeaderboardPage() {
     })()
   }, [])
 
-  // Compute standings from finalized matches (same tie-break style as standings page)
+  // Compute standings per group from finalized matches
   const standingsByGroup = useMemo(() => {
     const table = {}
     for (const g of groups) table[g.id] = {}
@@ -186,6 +183,7 @@ export default function LeaderboardPage() {
         gd: r.gf - r.ga
       }))
 
+      // tie-break for test set: pts -> gd -> gf -> name
       rows.sort((x, y) => {
         if (y.pts !== x.pts) return y.pts - x.pts
         if (y.gd !== x.gd) return y.gd - x.gd
@@ -199,7 +197,7 @@ export default function LeaderboardPage() {
     return result
   }, [groups, teams, finalMatches])
 
-  // Build lookup: submitted picks -> per user -> per group -> per position
+  // Map submitted picks by user/group/position
   const picksByUser = useMemo(() => {
     const map = {}
     for (const p of submittedPicks) {
@@ -211,9 +209,8 @@ export default function LeaderboardPage() {
     return map
   }, [submittedPicks])
 
-  // Score users
+  // Score all submitted users
   const leaderboardRows = useMemo(() => {
-    // Only show users who submitted (profiles table)
     const users = profiles
       .filter(p => p.bracket_submitted)
       .map(p => ({
@@ -228,7 +225,7 @@ export default function LeaderboardPage() {
 
       for (const g of groups) {
         const actual = standingsByGroup[g.id] ?? []
-        const actualOrder = actual.slice(0, 4).map(r => r.teamId) // rank1..rank4
+        const actualOrder = actual.slice(0, 4).map(r => r.teamId)
 
         const userGroup = picksByUser[u.user_id]?.[g.id] ?? {}
 
@@ -247,11 +244,7 @@ export default function LeaderboardPage() {
 
         if (correctCount === 4) groupPts += PERFECT_GROUP_BONUS
 
-        groupBreakdown[g.id] = {
-          points: groupPts,
-          correct: correctCount
-        }
-
+        groupBreakdown[g.id] = { points: groupPts, correct: correctCount }
         total += groupPts
       }
 
@@ -265,7 +258,7 @@ export default function LeaderboardPage() {
       }
     })
 
-    // Sort by total desc, then submitted_at asc (earlier submit wins tie)
+    // Sort by total desc, then earlier submit wins tie
     rows.sort((a, b) => {
       if (b.total !== a.total) return b.total - a.total
       const at = a.submitted_at ? new Date(a.submitted_at).getTime() : 0
@@ -279,6 +272,7 @@ export default function LeaderboardPage() {
   async function saveDisplayName() {
     if (!me) return
     setMsg('Saving name...')
+
     const { error, data } = await supabase
       .from('profiles')
       .update({ display_name: myNameDraft })
@@ -292,7 +286,7 @@ export default function LeaderboardPage() {
     }
 
     setMyProfile(data)
-    setMsg('Saved ✅ (refresh leaderboard to see it update)')
+    setMsg('Saved ✅ (refresh to see name update)')
   }
 
   if (loading) {
@@ -325,7 +319,7 @@ export default function LeaderboardPage() {
 
       <p style={{ fontSize: 12, opacity: 0.75 }}>
         Scoring (test): 1st=3, 2nd=2, 3rd=1, 4th=0, perfect group +{PERFECT_GROUP_BONUS}.
-        Updates live based on finalized matches.
+        Updates live from finalized matches.
       </p>
 
       {myProfile && (
@@ -360,11 +354,20 @@ export default function LeaderboardPage() {
               >
                 <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10 }}>
                   <div>
-                    <strong>{idx + 1}. {r.name}</strong>
+                    <strong>
+                      {idx + 1}.{' '}
+                      <a href={`/bracket/${r.user_id}`} style={{ textDecoration: 'underline' }}>
+                        {r.name}
+                      </a>
+                    </strong>
+
                     <div style={{ fontSize: 12, opacity: 0.7 }}>
-                      Submitted: {r.submitted_at ? new Date(r.submitted_at).toLocaleString() : '—'}
+                      Submitted:{' '}
+                      {r.submitted_at ? new Date(r.submitted_at).toLocaleString() : '—'} •{' '}
+                      <a href={`/bracket/${r.user_id}`}>View bracket →</a>
                     </div>
                   </div>
+
                   <div style={{ fontSize: 18, fontWeight: 700 }}>
                     {r.total} pts
                   </div>
@@ -385,3 +388,4 @@ export default function LeaderboardPage() {
     </main>
   )
 }
+
