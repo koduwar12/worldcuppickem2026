@@ -1,17 +1,9 @@
 'use client'
 export const dynamic = 'force-dynamic'
 
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { supabase } from '../../lib/supabaseClient'
-
-const ROUND_ORDER = ['R32', 'R16', 'QF', 'SF', 'F']
-const ROUND_LABEL = {
-  R32: 'Round of 32',
-  R16: 'Round of 16',
-  QF: 'Quarterfinals',
-  SF: 'Semifinals',
-  F: 'Final'
-}
+import KnockoutBracket from '../components/KnockoutBracket'
 
 export default function KnockoutPage() {
   const [loading, setLoading] = useState(true)
@@ -41,7 +33,7 @@ export default function KnockoutPage() {
         supabase
           .from('knockout_matches')
           .select(`
-            id, round, match_no, home_team_id, away_team_id, is_final,
+            id, round, match_no, home_team_id, away_team_id, home_score, away_score, is_final,
             home:home_team_id ( id, name ),
             away:away_team_id ( id, name )
           `)
@@ -76,16 +68,6 @@ export default function KnockoutPage() {
       setLoading(false)
     })()
   }, [])
-
-  const matchesByRound = useMemo(() => {
-    const map = {}
-    for (const r of ROUND_ORDER) map[r] = []
-    for (const m of matches) {
-      if (!map[m.round]) map[m.round] = []
-      map[m.round].push(m)
-    }
-    return map
-  }, [matches])
 
   const locked = !!submittedAt
 
@@ -142,6 +124,10 @@ export default function KnockoutPage() {
     setMsg('Submitted ✅ (locked 🔒)')
   }
 
+  function onSelect(matchId, teamId) {
+    setSelections(prev => ({ ...prev, [matchId]: teamId }))
+  }
+
   if (loading) {
     return (
       <div className="container">
@@ -174,7 +160,7 @@ export default function KnockoutPage() {
 
       <h1 className="h1" style={{ marginTop: 16 }}>Knockout Picks</h1>
       <p className="sub">
-        Pick winners for the posted matches. Save drafts anytime. Submit locks 🔒
+        Pick winners inside the bracket. Save drafts anytime. Submit locks 🔒
       </p>
 
       {locked && (
@@ -185,61 +171,14 @@ export default function KnockoutPage() {
 
       {msg && <p style={{ marginTop: 10 }}>{msg}</p>}
 
-      {ROUND_ORDER.map(r => (
-        <div key={r} className="card" style={{ marginTop: 18 }}>
-          <h2 className="cardTitle" style={{ marginTop: 0 }}>{ROUND_LABEL[r] || r}</h2>
-
-          {(matchesByRound[r] ?? []).length === 0 && (
-            <p className="cardSub">No matches posted yet.</p>
-          )}
-
-          {(matchesByRound[r] ?? []).map(m => {
-            const home = m.home
-            const away = m.away
-            const canPick = home?.id && away?.id
-
-            return (
-              <div
-                key={m.id}
-                style={{
-                  marginTop: 12,
-                  padding: 14,
-                  borderRadius: 14,
-                  background: 'rgba(255,255,255,.05)',
-                  border: '1px solid rgba(255,255,255,.10)'
-                }}
-              >
-                <div style={{ fontSize: 12, opacity: 0.75, fontWeight: 800 }}>
-                  Match {m.match_no}
-                </div>
-
-                <div style={{ marginTop: 6, fontWeight: 900 }}>
-                  {home?.name ?? 'TBD'} vs {away?.name ?? 'TBD'}
-                </div>
-
-                <div style={{ marginTop: 10 }}>
-                  <select
-                    className="field"
-                    disabled={locked || !canPick}
-                    value={selections[m.id] ?? ''}
-                    onChange={e => setSelections(prev => ({ ...prev, [m.id]: e.target.value }))}
-                  >
-                    <option value="">
-                      {canPick ? 'Select winner…' : 'Teams not set yet'}
-                    </option>
-                    {canPick && (
-                      <>
-                        <option value={home.id}>{home.name}</option>
-                        <option value={away.id}>{away.name}</option>
-                      </>
-                    )}
-                  </select>
-                </div>
-              </div>
-            )
-          })}
-        </div>
-      ))}
+      <KnockoutBracket
+        matches={matches}
+        selections={selections}
+        locked={locked}
+        onSelect={onSelect}
+        mode="picks"
+        subtitle="Scroll horizontally on mobile. Connector lines show progression through rounds."
+      />
 
       <div style={{ marginTop: 18, display: 'flex', gap: 12, flexWrap: 'wrap' }}>
         <button className="btn" disabled={locked} onClick={saveDraft}>
