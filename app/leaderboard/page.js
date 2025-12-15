@@ -20,35 +20,25 @@ export default function LeaderboardPage() {
     const { data: auth } = await supabase.auth.getUser()
     setMe(auth?.user ?? null)
 
-    // Try these in order (in case your DB object is named differently)
-    const candidates = ['leaderboard', 'leaderboard_view', 'leaderboard_public']
+    const res = await supabase
+      .from('leaderboard')
+      .select('*')
+      .order('points', { ascending: false })
 
-    let lastErr = null
-    for (const name of candidates) {
-      const res = await supabase
-        .from(name)
-        .select('*')
-        .order('points', { ascending: false })
-
-      if (!res.error) {
-        // Normalize columns (in case names differ)
-        const normalized = (res.data || []).map(r => ({
-          user_id: r.user_id ?? r.userid ?? r.id ?? r.user,
-          name: r.name ?? r.display_name ?? r.username ?? r.email ?? 'Unknown',
-          points: r.points ?? r.total_points ?? 0
-        }))
-
-        setRows(normalized)
-        setLoading(false)
-        return
-      }
-
-      lastErr = `Tried "${name}": ${res.error.message}`
+    if (res.error) {
+      setMsg(res.error.message)
+      setRows([])
+      setLoading(false)
+      return
     }
 
-    // If we get here, all attempts failed
-    setMsg(lastErr || 'Could not load leaderboard.')
-    setRows([])
+    const normalized = (res.data || []).map(r => ({
+      user_id: r.user_id ?? r.userid ?? r.id ?? r.user,
+      name: r.name ?? r.display_name ?? r.username ?? r.email ?? 'Unknown',
+      points: r.points ?? r.total_points ?? 0
+    }))
+
+    setRows(normalized)
     setLoading(false)
   }
 
@@ -65,6 +55,7 @@ export default function LeaderboardPage() {
       <div className="nav">
         <a className="pill" href="/">🏠 Main Menu</a>
         <a className="pill" href="/standings">📊 Standings</a>
+        <a className="pill" href="/picks">👉 Group Picks</a>
       </div>
 
       <h1 className="h1" style={{ marginTop: 16 }}>Leaderboard</h1>
@@ -72,14 +63,19 @@ export default function LeaderboardPage() {
       {msg && (
         <div className="card" style={{ marginTop: 14 }}>
           <p style={{ marginTop: 0, fontWeight: 800 }}>Leaderboard error:</p>
-          <p style={{ marginBottom: 0, opacity: 0.85 }}>{msg}</p>
+          <p style={{ marginBottom: 0, opacity: 0.85 }}>
+            {msg}
+          </p>
+          <p style={{ marginTop: 10, fontSize: 12, opacity: 0.7 }}>
+            If this says the table/view doesn’t exist, create a Supabase VIEW called <strong>leaderboard</strong>.
+          </p>
         </div>
       )}
 
       {!msg && rows.length === 0 && (
         <div className="card" style={{ marginTop: 14 }}>
           <p style={{ margin: 0 }}>
-            No leaderboard data yet. (This usually means no picks/results have been scored yet, or your leaderboard view/table is empty.)
+            No leaderboard data yet.
           </p>
         </div>
       )}
