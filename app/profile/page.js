@@ -9,8 +9,6 @@ export default function ProfilePage() {
 
   const [displayName, setDisplayName] = useState('')
   const [savedName, setSavedName] = useState('')
-  const [nameChangedAt, setNameChangedAt] = useState(null)
-
   const [msg, setMsg] = useState('')
 
   useEffect(() => {
@@ -29,7 +27,7 @@ export default function ProfilePage() {
 
       const { data: prof, error } = await supabase
         .from('profiles')
-        .select('display_name, name_changed_at')
+        .select('display_name')
         .eq('user_id', u.id)
         .maybeSingle()
 
@@ -42,12 +40,10 @@ export default function ProfilePage() {
       const dn = (prof?.display_name ?? '').trim()
       setDisplayName(dn)
       setSavedName(dn)
-      setNameChangedAt(prof?.name_changed_at ?? null)
+
       setLoading(false)
     })()
   }, [])
-
-  const canChangeName = !nameChangedAt
 
   function validateName(n) {
     const name = n.trim()
@@ -69,25 +65,15 @@ export default function ProfilePage() {
       return
     }
 
-    if (!canChangeName && name.toLowerCase() !== (savedName || '').toLowerCase()) {
-      setMsg('You already used your one name change.')
-      return
-    }
-
-    // If they are setting it for the first time OR changing once:
-    const payload = canChangeName
-      ? { display_name: name, name_changed_at: new Date().toISOString() }
-      : { display_name: name } // (should only be same name anyway)
-
     setMsg('Saving…')
 
     const { error } = await supabase
       .from('profiles')
-      .update(payload)
+      .update({ display_name: name })
       .eq('user_id', user.id)
 
     if (error) {
-      // Unique index error usually contains "duplicate key"
+      // If you kept the "unique name" index, show a friendly message
       if ((error.message || '').toLowerCase().includes('duplicate')) {
         setMsg('That name is already taken. Please choose another.')
       } else {
@@ -97,8 +83,7 @@ export default function ProfilePage() {
     }
 
     setSavedName(name)
-    if (canChangeName) setNameChangedAt(payload.name_changed_at)
-    setMsg('Saved ✅')
+    setMsg('Saved ✅ Your name will update everywhere.')
   }
 
   if (loading) {
@@ -113,7 +98,7 @@ export default function ProfilePage() {
     return (
       <div className="container">
         <div className="card">
-          <p style={{ margin: 0 }}>Please sign in.</p>
+          <p style={{ margin: 0 }}>Please sign in first.</p>
           <div className="nav" style={{ marginTop: 12 }}>
             <a className="pill" href="/">🏠 Main Menu</a>
           </div>
@@ -126,41 +111,39 @@ export default function ProfilePage() {
     <div className="container">
       <div className="nav">
         <a className="pill" href="/">🏠 Main Menu</a>
-        <a className="pill" href="/leaderboard">🏆 Leaderboard</a>
         <a className="pill" href="/picks">👉 Picks</a>
+        <a className="pill" href="/standings">📊 Standings</a>
+        <a className="pill" href="/leaderboard">🏆 Leaderboard</a>
       </div>
 
       <h1 className="h1" style={{ marginTop: 16 }}>My Profile</h1>
 
       <div className="card" style={{ marginTop: 12, maxWidth: 560 }}>
-        <p style={{ marginTop: 0, opacity: 0.75, fontSize: 12 }}>
-          Your name is shown on the leaderboard and your bracket page.
-          <br />
-          <strong>You can change it only once.</strong>
+        <p style={{ marginTop: 0, opacity: 0.8, fontSize: 12 }}>
+          This name is shown on the leaderboard and on your bracket page.
         </p>
 
-        <label style={{ fontSize: 12, opacity: 0.8, fontWeight: 800 }}>Display name</label>
+        <label style={{ fontSize: 12, opacity: 0.8, fontWeight: 800 }}>
+          Display name
+        </label>
         <div style={{ height: 8 }} />
 
         <input
           className="field"
           value={displayName}
           onChange={e => setDisplayName(e.target.value)}
-          disabled={!canChangeName && displayName.trim().toLowerCase() !== (savedName || '').toLowerCase()}
           placeholder="Your name (e.g., Koda)"
         />
 
         <div style={{ height: 12 }} />
 
-        <button className="btn btnPrimary" onClick={saveName}>
+        <button
+          className="btn btnPrimary"
+          onClick={saveName}
+          disabled={displayName.trim() === savedName.trim()}
+        >
           Save Name
         </button>
-
-        {!canChangeName && (
-          <p style={{ marginTop: 12, fontSize: 12, opacity: 0.75 }}>
-            🔒 Name change used on {new Date(nameChangedAt).toLocaleString()}.
-          </p>
-        )}
 
         {msg && <p style={{ marginTop: 12 }}>{msg}</p>}
       </div>
