@@ -13,7 +13,6 @@ const ROUND_LABEL = {
   F: 'Final'
 }
 
-// Match counts per round
 const ROUND_MATCH_COUNTS = {
   R32: 16,
   R16: 8,
@@ -44,7 +43,7 @@ export default function AdminKnockoutPage() {
       setUser(u)
 
       if (!u) {
-        setMsg('Not authorized.')
+        setMsg('Not found.')
         setLoading(false)
         return
       }
@@ -56,7 +55,7 @@ export default function AdminKnockoutPage() {
         .maybeSingle()
 
       if (!prof?.is_admin) {
-        setMsg('Not authorized.')
+        setMsg('Not found.')
         setLoading(false)
         return
       }
@@ -74,9 +73,9 @@ export default function AdminKnockoutPage() {
       supabase.from('teams').select('id, name').order('name'),
       supabase
         .from('knockout_matches')
-        .select('round, match_no, home_team_id, away_team_id')
-        .order('round')
-        .order('match_no')
+        .select('round, match_no, home_team_id, away_team_id, home_score, away_score, is_final')
+        .order('round', { ascending: true })
+        .order('match_no', { ascending: true })
     ])
 
     if (tRes.error || mRes.error) {
@@ -90,7 +89,6 @@ export default function AdminKnockoutPage() {
     setTeams(t)
     setMatches(m)
 
-    // Build draft state
     const d = {}
     for (const r of ROUND_ORDER) d[r] = {}
 
@@ -101,9 +99,9 @@ export default function AdminKnockoutPage() {
       }
     }
 
-    // Ensure slots exist
+    // Ensure all slots exist so selects are controlled
     for (const r of ROUND_ORDER) {
-      const count = ROUND_MATCH_COUNTS[r]
+      const count = ROUND_MATCH_COUNTS[r] ?? 0
       for (let i = 1; i <= count; i++) {
         if (!d[r][i]) d[r][i] = { home_team_id: '', away_team_id: '' }
       }
@@ -128,12 +126,13 @@ export default function AdminKnockoutPage() {
   async function saveRound(round) {
     setMsg('Saving…')
 
-    const count = ROUND_MATCH_COUNTS[round]
+    const count = ROUND_MATCH_COUNTS[round] ?? 0
     const rows = []
 
     for (let matchNo = 1; matchNo <= count; matchNo++) {
-      const cur = draft[round][matchNo]
+      const cur = draft?.[round]?.[matchNo] ?? { home_team_id: '', away_team_id: '' }
 
+      // IMPORTANT: do NOT include "id" here (id is auto-generated in DB)
       rows.push({
         round,
         match_no: matchNo,
@@ -142,7 +141,7 @@ export default function AdminKnockoutPage() {
       })
     }
 
-    // 🔑 Upsert using UNIQUE (round, match_no)
+    // IMPORTANT: requires UNIQUE(round, match_no) in DB
     const { error } = await supabase
       .from('knockout_matches')
       .upsert(rows, { onConflict: 'round,match_no' })
@@ -152,19 +151,18 @@ export default function AdminKnockoutPage() {
       return
     }
 
-    setMsg(`Saved ${ROUND_LABEL[round]} ✅`)
+    setMsg(`Saved ${ROUND_LABEL[round] || round} ✅`)
     await loadAll()
   }
 
   async function clearRound(round) {
-    const ok = confirm(`Clear all teams for ${ROUND_LABEL[round]}?`)
+    const ok = confirm(`Clear all teams for ${ROUND_LABEL[round] || round}?`)
     if (!ok) return
 
     setMsg('Clearing…')
 
-    const count = ROUND_MATCH_COUNTS[round]
+    const count = ROUND_MATCH_COUNTS[round] ?? 0
     const rows = []
-
     for (let i = 1; i <= count; i++) {
       rows.push({
         round,
@@ -183,9 +181,19 @@ export default function AdminKnockoutPage() {
       return
     }
 
-    setMsg(`Cleared ${ROUND_LABEL[round]} ✅`)
+    setMsg(`Cleared ${ROUND_LABEL[round] || round} ✅`)
     await loadAll()
   }
+
+  const matchesByRound = useMemo(() => {
+    const map = {}
+    for (const r of ROUND_ORDER) map[r] = []
+    for (const m of matches) {
+      if (!map[m.round]) map[m.round] = []
+      map[m.round].push(m)
+    }
+    return map
+  }, [matches])
 
   if (loading) {
     return (
@@ -199,8 +207,10 @@ export default function AdminKnockoutPage() {
     return (
       <div className="container">
         <div className="card">
-          <p>{msg || 'Not authorized.'}</p>
-          <a className="pill" href="/">🏠 Main Menu</a>
+          <p style={{ margin: 0 }}>{msg || 'Not found.'}</p>
+          <div className="nav" style={{ marginTop: 12 }}>
+            <a className="pill" href="/">🏠 Main Menu</a>
+          </div>
         </div>
       </div>
     )
@@ -211,41 +221,49 @@ export default function AdminKnockoutPage() {
       <div className="nav">
         <a className="pill" href="/">🏠 Main Menu</a>
         <a className="pill" href="/admin">🛠 Admin Hub</a>
-        <a className="pill" href="/knockout">🏟 Knockout Picks</a>
+        <a className="pill" href="/admin/groups">📊 Group Admin</a>
         <button className="pill" onClick={loadAll}>🔄 Refresh</button>
       </div>
 
       <h1 className="h1" style={{ marginTop: 16 }}>Admin — Knockout Setup</h1>
-      <p className="sub">Assign teams to each knockout match.</p>
+      <p className="sub">Assign teams for each knockout match. Click Save per round.</p>
 
-      {msg && <div className="badge">{msg}</div>}
+      {msg && <div className="badge" style={{ marginTop: 10 }}>{msg}</div>}
 
       {ROUND_ORDER.map(round => (
         <div key={round} className="card" style={{ marginTop: 18 }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}>
-            <h2 className="cardTitle">{ROUND_LABEL[round]}</h2>
+          <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'center' }}>
+            <h2 className="cardTitle" style={{ margin: 0 }}>{ROUND_LABEL[round] || round}</h2>
             <div style={{ display: 'flex', gap: 8 }}>
               <button className="btn" onClick={() => clearRound(round)}>Clear</button>
               <button className="btn btnPrimary" onClick={() => saveRound(round)}>Save</button>
             </div>
           </div>
 
+          <div style={{ marginTop: 12, opacity: 0.85, fontSize: 13 }}>
+            Saved matches in DB for this round: {(matchesByRound[round] ?? []).length}
+          </div>
+
           {Array.from({ length: ROUND_MATCH_COUNTS[round] }).map((_, i) => {
             const matchNo = i + 1
-            const cur = draft?.[round]?.[matchNo]
+            const cur = draft?.[round]?.[matchNo] ?? { home_team_id: '', away_team_id: '' }
+
+            const sameTeam = cur.home_team_id && cur.home_team_id === cur.away_team_id
 
             return (
-              <div key={matchNo} style={{ marginTop: 12 }}>
-                <strong>Match {matchNo}</strong>
+              <div key={matchNo} style={{ marginTop: 14 }}>
+                <div style={{ fontWeight: 900 }}>Match {matchNo}</div>
 
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginTop: 6 }}>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginTop: 8 }}>
                   <select
                     className="field"
                     value={cur.home_team_id || ''}
                     onChange={e => setDraftTeam(round, matchNo, 'home_team_id', e.target.value)}
                   >
                     <option value="">Home team</option>
-                    {teams.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+                    {teams.map(t => (
+                      <option key={t.id} value={t.id}>{t.name}</option>
+                    ))}
                   </select>
 
                   <select
@@ -254,14 +272,16 @@ export default function AdminKnockoutPage() {
                     onChange={e => setDraftTeam(round, matchNo, 'away_team_id', e.target.value)}
                   >
                     <option value="">Away team</option>
-                    {teams.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+                    {teams.map(t => (
+                      <option key={t.id} value={t.id}>{t.name}</option>
+                    ))}
                   </select>
                 </div>
 
-                {cur.home_team_id && cur.home_team_id === cur.away_team_id && (
-                  <p style={{ color: '#f87171', fontWeight: 800 }}>
-                    Home and away cannot be the same team
-                  </p>
+                {sameTeam && (
+                  <div style={{ marginTop: 8, fontWeight: 900, color: '#f87171' }}>
+                    Home and away cannot be the same team.
+                  </div>
                 )}
               </div>
             )
