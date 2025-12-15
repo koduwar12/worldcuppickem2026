@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react'
 import { useParams } from 'next/navigation'
 import { supabase } from '../../../lib/supabaseClient'
+import KnockoutBracket from '../../components/KnockoutBracket'
 
 export default function ViewBracketPage() {
   const params = useParams()
@@ -14,6 +15,11 @@ export default function ViewBracketPage() {
   const [picks, setPicks] = useState({})
   const [scoreMap, setScoreMap] = useState({})
   const [profile, setProfile] = useState(null)
+
+  // Knockout
+  const [koMatches, setKoMatches] = useState([])
+  const [koSelections, setKoSelections] = useState({})
+  const [koSubmittedAt, setKoSubmittedAt] = useState(null)
 
   useEffect(() => {
     if (!userId || userId === 'undefined') {
@@ -28,58 +34,82 @@ export default function ViewBracketPage() {
     setLoading(true)
     setMsg('')
 
-    const { data: groupData, error: gErr } = await supabase
-      .from('groups')
-      .select('id, name, teams(id, name)')
-      .order('name')
+    // Load in parallel
+    const [groupRes, pickRes, scoreRes, profRes, koMatchRes, koPickRes] = await Promise.all([
+      supabase.from('groups').select('id, name, teams(id, name)').order('name'),
+      supabase
+        .from('group_picks')
+        .select('group_id, team_id, position, submitted_at')
+        .eq('user_id', uid)
+        .not('submitted_at', 'is', null),
+      supabase
+        .from('group_pick_scores')
+        .select('group_id, team_id, picked_position, actual_position, points_awarded, exact, qualified_wrong_order')
+        .eq('user_id', uid),
+      supabase
+        .from('profiles')
+        .select('display_name')
+        .eq('user_id', uid)
+        .maybeSingle(),
+      supabase
+        .from('knockout_matches')
+        .select(`
+          id, round, match_no, home_team_id, away_team_id, home_score, away_score, is_final,
+          home:home_team_id ( id, name ),
+          away:away_team_id ( id, name )
+        `)
+        .order('round', { ascending: true })
+        .order('match_no', { ascending: true }),
+      supabase
+        .from('knockout_picks')
+        .select('match_id, picked_winner_team_id, submitted_at')
+        .eq('user_id', uid)
+    ])
 
-    if (gErr) {
-      setMsg(gErr.message)
+    if (groupRes.error) {
+      setMsg(groupRes.error.message)
+      setLoading(false)
+      return
+    }
+    if (pickRes.error) {
+      setMsg(pickRes.error.message)
       setLoading(false)
       return
     }
 
-    const { data: pickData, error: pErr } = await supabase
-      .from('group_picks')
-      .select('group_id, team_id, position, submitted_at')
-      .eq('user_id', uid)
-      .not('submitted_at', 'is', null)
-
-    if (pErr) {
-      setMsg(pErr.message)
-      setLoading(false)
-      return
+    // Group scoring can be unavailable
+    if (scoreRes.error) {
+      setMsg('Scoring not available yet.')
     }
 
-    const { data: scoreData, error: sErr } = await supabase
-      .from('group_pick_scores')
-      .select('group_id, team_id, picked_position, actual_position, points_awarded, exact, qualified_wrong_order')
-      .eq('user_id', uid)
-
-    if (sErr) {
-      setMsg(`Scoring not available yet.`)
-    }
-
-    const { data: prof } = await supabase
-      .from('profiles')
-      .select('display_name')
-      .eq('user_id', uid)
-      .maybeSingle()
-
+    // Build group pick maps
     const pickMap = {}
-    pickData?.forEach(p => {
+    ;(pickRes.data || []).forEach(p => {
       pickMap[`${p.group_id}-${p.position}`] = p.team_id
     })
 
     const sMap = {}
-    scoreData?.forEach(s => {
+    ;(scoreRes.data || []).forEach(s => {
       sMap[`${s.group_id}-${s.picked_position}`] = s
     })
 
-    setGroups(groupData || [])
+    // Knockout selections
+    const koSel = {}
+    let koSub = null
+    ;(koPickRes.data || []).forEach(p => {
+      if (p.picked_winner_team_id) koSel[p.match_id] = p.picked_winner_team_id
+      if (p.submitted_at) koSub = p.submitted_at
+    })
+
+    setGroups(groupRes.data || [])
     setPicks(pickMap)
     setScoreMap(sMap)
-    setProfile(prof || null)
+    setProfile(profRes.data || null)
+
+    setKoMatches(koMatchRes.data || [])
+    setKoSelections(koSel)
+    setKoSubmittedAt(koSub)
+
     setLoading(false)
   }
 
@@ -119,7 +149,26 @@ export default function ViewBracketPage() {
       <h1 className="h1" style={{ marginTop: 16 }}>
         {displayName}’s Bracket
       </h1>
-      <p className="sub">Group stage picks (read-only)</p>
+
+      {/* Knockout first */}
+      <p className="sub">Knockout bracket (read-only)</p>
+
+      {koSubmittedAt && (
+        <div className="badge" style={{ marginTop: 10 }}>
+          🔒 Knockout submitted on {new Date(koSubmittedAt).toLocaleString()}
+        </div>
+      )}
+
+      <KnockoutBracket
+        matches={koMatches}
+        selections={koSelections}
+        locked={true}
+        mode="view"
+        subtitle="Picks show ✅/❌ once matches are finalized."
+      />
+
+      {/* Existing Group Stage section stays below */}
+      <p className="sub" style={{ marginTop: 18 }}>Group stage picks (read-only)</p>
 
       {/* ---------- LEGEND ---------- */}
       <div
