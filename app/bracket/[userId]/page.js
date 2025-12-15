@@ -1,12 +1,10 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { useParams } from 'next/navigation'
 import { supabase } from '../../../lib/supabaseClient'
 
-export default function ViewBracketPage() {
-  const params = useParams()
-  const userId = params?.user_id // comes from folder name [user_id]
+export default function ViewBracketPage({ params }) {
+  const userId = params?.user_id
 
   const [loading, setLoading] = useState(true)
   const [msg, setMsg] = useState('')
@@ -15,17 +13,12 @@ export default function ViewBracketPage() {
   const [profile, setProfile] = useState(null)
 
   useEffect(() => {
-    // Wait until the route param is actually available
-    if (!userId || userId === 'undefined') {
-      setLoading(false)
-      return
-    }
-
-    load(userId)
+    if (!userId) return
+    load()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [userId])
 
-  async function load(uid) {
+  async function load() {
     setLoading(true)
     setMsg('')
 
@@ -41,11 +34,11 @@ export default function ViewBracketPage() {
       return
     }
 
-    // Load that user's submitted picks
+    // Load that user's picks (submitted only)
     const { data: pickData, error: pErr } = await supabase
       .from('group_picks')
       .select('group_id, team_id, position, submitted_at')
-      .eq('user_id', uid)
+      .eq('user_id', userId)
       .not('submitted_at', 'is', null)
 
     if (pErr) {
@@ -54,22 +47,37 @@ export default function ViewBracketPage() {
       return
     }
 
-    // Optional: display name (won’t break if not found)
+    // Optional: display name from profiles
     const { data: profileData } = await supabase
       .from('profiles')
       .select('display_name')
-      .eq('user_id', uid)
+      .eq('user_id', userId)
       .maybeSingle()
+
+    setGroups(groupData || [])
 
     const map = {}
     pickData?.forEach(p => {
       map[`${p.group_id}-${p.position}`] = p.team_id
     })
 
-    setGroups(groupData || [])
     setPicks(map)
     setProfile(profileData || null)
     setLoading(false)
+  }
+
+  if (!userId) {
+    return (
+      <div className="container">
+        <div className="card">
+          <p>Invalid bracket link.</p>
+          <div className="nav" style={{ marginTop: 10 }}>
+            <a className="pill" href="/leaderboard">🏆 Back to Leaderboard</a>
+            <a className="pill" href="/">🏠 Main Menu</a>
+          </div>
+        </div>
+      </div>
+    )
   }
 
   if (loading) {
@@ -82,26 +90,11 @@ export default function ViewBracketPage() {
     )
   }
 
-  // If userId is missing, it means the URL isn’t /bracket/<uuid>
-  if (!userId || userId === 'undefined') {
-    return (
-      <div className="container">
-        <div className="card">
-          <p style={{ marginTop: 0 }}>Invalid bracket link.</p>
-          <div className="nav" style={{ marginTop: 10 }}>
-            <a className="pill" href="/leaderboard">🏆 Back to Leaderboard</a>
-            <a className="pill" href="/">🏠 Main Menu</a>
-          </div>
-        </div>
-      </div>
-    )
-  }
-
   if (msg) {
     return (
       <div className="container">
         <div className="card">
-          <p style={{ marginTop: 0 }}>{msg}</p>
+          <p>{msg}</p>
           <div className="nav" style={{ marginTop: 10 }}>
             <a className="pill" href="/leaderboard">🏆 Back to Leaderboard</a>
             <a className="pill" href="/">🏠 Main Menu</a>
@@ -112,7 +105,8 @@ export default function ViewBracketPage() {
   }
 
   const displayName =
-    profile?.display_name?.trim() || `User ${String(userId).slice(0, 6)}`
+    profile?.display_name?.trim() ||
+    `User ${String(userId).slice(0, 6)}`
 
   return (
     <div className="container">
@@ -138,7 +132,8 @@ export default function ViewBracketPage() {
         <div key={group.id} className="card" style={{ marginTop: 18 }}>
           <h2 className="cardTitle">{group.name}</h2>
 
-          {[1, 2, 3, 4].map(position => {
+          {group.teams.map((_t, index) => {
+            const position = index + 1
             const pickedTeamId = picks[`${group.id}-${position}`]
             const pickedTeam = group.teams.find(t => t.id === pickedTeamId)
 
