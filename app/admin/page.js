@@ -23,29 +23,21 @@ export default function AdminPage() {
       setUser(u)
 
       if (!u) {
-        // Discreet: don’t reveal “admin page exists”
         setMsg('Not found.')
         setLoading(false)
         return
       }
 
-      // ✅ Admin check via profiles.is_admin (reliable, no separate admin_emails table)
+      // Admin check via profiles.is_admin
       const { data: prof, error: profErr } = await supabase
         .from('profiles')
         .select('is_admin')
         .eq('user_id', u.id)
         .maybeSingle()
 
-      if (profErr) {
-        // Still discreet
+      if (profErr || !prof?.is_admin) {
         setMsg('Not found.')
-        setLoading(false)
-        return
-      }
-
-      if (!prof?.is_admin) {
         setIsAdmin(false)
-        setMsg('Not found.')
         setLoading(false)
         return
       }
@@ -80,7 +72,6 @@ export default function AdminPage() {
     const rows = data ?? []
     setMatches(rows)
 
-    // Initialize controlled inputs from DB values
     const initialDraft = {}
     for (const m of rows) {
       initialDraft[m.id] = {
@@ -127,14 +118,13 @@ export default function AdminPage() {
       return
     }
 
-    // Update local state only (no jump)
     setMatches(prev =>
       prev.map(m =>
         m.id === matchId ? { ...m, home_score: homeVal, away_score: awayVal } : m
       )
     )
 
-    setMsg('Saved ✅ (Standings uses FINALIZED matches.)')
+    setMsg('Saved ✅ (Standings/leaderboard update only after Finalize.)')
   }
 
   async function finalizeMatch(matchId) {
@@ -144,7 +134,6 @@ export default function AdminPage() {
       return
     }
 
-    // Ensure scores saved first
     await saveMatch(matchId)
 
     setMsg('Finalizing...')
@@ -162,7 +151,7 @@ export default function AdminPage() {
       prev.map(x => (x.id === matchId ? { ...x, is_final: true } : x))
     )
 
-    setMsg('Finalized ✅ (Now standings/leaderboard will update.)')
+    setMsg('Finalized ✅')
   }
 
   async function unfinalizeMatch(matchId) {
@@ -184,7 +173,7 @@ export default function AdminPage() {
     setMsg('Unfinalized ✅')
   }
 
-  // ---------- DISCREET GATE ----------
+  // --------- DISCREET GATE ----------
   if (loading) {
     return (
       <main className="container">
@@ -206,87 +195,124 @@ export default function AdminPage() {
     )
   }
 
-  // ---------- ADMIN UI ----------
+  const groupIds = Object.keys(grouped).sort()
+
   return (
-    <main style={{ padding: 24 }}>
-      {/* NAV */}
-      <div style={{ display: 'flex', gap: 14, marginBottom: 14 }}>
-        <a href="/">Home</a>
-        <a href="/picks">Picks</a>
-        <a href="/standings">Standings</a>
-        <a href="/leaderboard">Leaderboard</a>
-        <button onClick={loadMatches}>Refresh</button>
+    <main className="container">
+      <div className="nav">
+        <a className="pill" href="/">🏠 Main Menu</a>
+        <a className="pill" href="/picks">👉 Picks</a>
+        <a className="pill" href="/standings">📊 Standings</a>
+        <a className="pill" href="/leaderboard">🏆 Leaderboard</a>
+        <button className="pill" onClick={loadMatches} style={{ cursor: 'pointer' }}>
+          🔄 Refresh
+        </button>
       </div>
 
-      <h1>Admin — Enter Match Results</h1>
-
-      <p style={{ fontSize: 12, opacity: 0.75, marginTop: 6 }}>
+      <h1 className="h1" style={{ marginTop: 16 }}>Admin — Enter Match Results</h1>
+      <p className="sub">
         Typing does not auto-save. Click <strong>Save</strong>. Standings/leaderboard update only after <strong>Finalize</strong>.
       </p>
 
-      {msg && <p style={{ marginTop: 10 }}>{msg}</p>}
+      {msg && (
+        <div className="card" style={{ marginTop: 12 }}>
+          <p style={{ margin: 0 }}>{msg}</p>
+        </div>
+      )}
 
-      {Object.keys(grouped).sort().map(groupId => (
+      {groupIds.map(groupId => (
         <section key={groupId} style={{ marginTop: 18 }}>
-          <h2 style={{ marginBottom: 8 }}>
+          <h2 className="cardTitle" style={{ marginBottom: 10 }}>
             {groupId === '-' ? 'No Group' : `Group ${groupId}`}
           </h2>
 
-          {grouped[groupId].map(m => {
-            const draft = draftScores[m.id] ?? { home: '', away: '' }
-            const canFinalize = draft.home !== '' && draft.away !== ''
+          <div className="card">
+            {(grouped[groupId] ?? []).map(m => {
+              const draft = draftScores[m.id] ?? { home: '', away: '' }
+              const canFinalize = draft.home !== '' && draft.away !== ''
 
-            return (
-              <div
-                key={m.id}
-                style={{
-                  border: '1px solid #ddd',
-                  padding: 12,
-                  marginTop: 10,
-                  maxWidth: 560
-                }}
-              >
-                <div style={{ fontWeight: 600 }}>
-                  {m.home?.name} vs {m.away?.name}
-                  {m.is_final ? ' ✅ (Final)' : ''}
-                </div>
+              return (
+                <div
+                  key={m.id}
+                  style={{
+                    padding: 12,
+                    borderRadius: 14,
+                    border: '1px solid rgba(255,255,255,.10)',
+                    marginTop: 10,
+                    background: 'rgba(255,255,255,.03)'
+                  }}
+                >
+                  <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}>
+                    <div style={{ fontWeight: 900 }}>
+                      {m.home?.name} vs {m.away?.name}
+                    </div>
 
-                <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginTop: 10 }}>
-                  <input
-                    type="text"
-                    inputMode="numeric"
-                    placeholder="Home"
-                    value={draft.home}
-                    disabled={m.is_final}
-                    onChange={e => setDraft(m.id, 'home', e.target.value)}
-                    style={{ width: 90, padding: 8 }}
-                  />
+                    <div style={{ fontSize: 12, opacity: 0.8, fontWeight: 800 }}>
+                      {m.is_final ? '✅ Final' : 'Draft'}
+                    </div>
+                  </div>
 
-                  <input
-                    type="text"
-                    inputMode="numeric"
-                    placeholder="Away"
-                    value={draft.away}
-                    disabled={m.is_final}
-                    onChange={e => setDraft(m.id, 'away', e.target.value)}
-                    style={{ width: 90, padding: 8 }}
-                  />
+                  <div
+                    style={{
+                      display: 'flex',
+                      gap: 10,
+                      alignItems: 'center',
+                      flexWrap: 'wrap',
+                      marginTop: 12
+                    }}
+                  >
+                    <input
+                      className="field"
+                      style={{ width: 110 }}
+                      inputMode="numeric"
+                      placeholder="Home"
+                      value={draft.home}
+                      disabled={m.is_final}
+                      onChange={e => setDraft(m.id, 'home', e.target.value)}
+                    />
 
-                  <button disabled={m.is_final} onClick={() => saveMatch(m.id)}>
-                    Save
-                  </button>
+                    <input
+                      className="field"
+                      style={{ width: 110 }}
+                      inputMode="numeric"
+                      placeholder="Away"
+                      value={draft.away}
+                      disabled={m.is_final}
+                      onChange={e => setDraft(m.id, 'away', e.target.value)}
+                    />
 
-                  {!m.is_final ? (
-                    <button disabled={!canFinalize} onClick={() => finalizeMatch(m.id)}>
-                      Finalize
+                    <button
+                      className="btn"
+                      disabled={m.is_final}
+                      onClick={() => saveMatch(m.id)}
+                    >
+                      Save
                     </button>
-                  ) : (
-                    <button onClick={() => unfinalizeMatch(m.id)}>Unfinalize</button>
+
+                    {!m.is_final ? (
+                      <button
+                        className="btn btnPrimary"
+                        disabled={!canFinalize}
+                        onClick={() => finalizeMatch(m.id)}
+                      >
+                        Finalize
+                      </button>
+                    ) : (
+                      <button className="btn" onClick={() => unfinalizeMatch(m.id)}>
+                        Unfinalize
+                      </button>
+                    )}
+                  </div>
+
+                  {!canFinalize && !m.is_final && (
+                    <div style={{ marginTop: 10, fontSize: 12, opacity: 0.75 }}>
+                      Tip: enter both scores to enable Finalize.
+                    </div>
                   )}
                 </div>
-              </div>
-            )
-          })}
+              )
+            })}
+          </div>
         </section>
       ))}
     </main>
