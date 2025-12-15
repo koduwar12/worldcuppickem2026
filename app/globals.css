@@ -1,0 +1,187 @@
+:root{
+  --bg0:#070A13;
+  --bg1:#0B1630;
+  --card: rgba(255,255,255,.08);
+  --card2: rgba(255,255,255,.12);
+  --text:#EAF0FF;
+  --muted: rgba(234,240,255,.72);
+  --border: rgba(255,255,255,.14);
+
+  --brand1:#7C3AED; /* purple */
+  --brand2:#22C55E; /* green */
+  --brand3:#06B6D4; /* cyan */
+  --danger:#EF4444;
+
+  --shadow: 0 12px 40px rgba(0,0,0,.35);
+  --radius: 18px;
+  --radius2: 24px;
+  --font: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial, "Apple Color Emoji","Segoe UI Emoji";
+}
+
+*{ box-sizing:border-box; }
+html,body{ height:100%; }
+body{
+  margin:0;
+  font-family: var(--font);
+  color: var(--text);
+  background:
+    radial-gradient(1200px 600px at 15% 10%, rgba(124,58,237,.35), transparent 60%),
+    radial-gradient(900px 500px at 85% 20%, rgba(34,197,94,.28), transparent 55%),
+    radial-gradient(1000px 700px at 45% 110%, rgba(6,182,212,.22), transparent 55%),
+    linear-gradient(180deg, var(--bg0), var(--bg1));
+}
+
+a{ color: inherit; }
+
+.container{
+  max-width: 980px;
+  margin: 0 auto;
+  padding: 28px 18px 60px;
+}
+
+.hero{
+  display:flex;
+  align-items:flex-start;
+  justify-content:space-between;
+  gap:16px;
+  margin-bottom: 18px;
+}
+
+.h1{
+  font-size: 34px;
+  line-height: 1.1;
+  margin: 0;
+  letter-spacing:-.5px;
+}
+.sub{
+  margin: 10px 0 0;
+  color: var(--muted);
+  font-size: 14px;
+}
+
+.badge{
+  display:inline-flex;
+  align-items:center;
+  gap:8px;
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  background: rgba(255,255,255,.06);
+  border-radius: 999px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.card{
+  border: 1px solid var(--border);
+  background: linear-gradient(180deg, rgba(255,255,255,.10), rgba(255,255,255,.06));
+  border-radius: var(--radius2);
+  box-shadow: var(--shadow);
+  padding: 18px;
+}
+
+.cardTitle{
+  margin: 0 0 6px;
+  font-weight: 700;
+  font-size: 18px;
+}
+.cardSub{
+  margin: 0 0 14px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.field{
+  width:100%;
+  padding: 12px 12px;
+  border-radius: 14px;
+  border: 1px solid rgba(255,255,255,.16);
+  background: rgba(0,0,0,.22);
+  color: var(--text);
+  outline: none;
+}
+.field::placeholder{ color: rgba(234,240,255,.55); }
+.field:focus{
+  border-color: rgba(124,58,237,.55);
+  box-shadow: 0 0 0 4px rgba(124,58,237,.18);
+}
+
+.row{ display:flex; gap:10px; flex-wrap:wrap; }
+
+.btn{
+  border: 1px solid var(--border);
+  background: rgba(255,255,255,.08);
+  color: var(--text);
+  padding: 10px 14px;
+  border-radius: 14px;
+  cursor: pointer;
+  font-weight: 650;
+  transition: transform .08s ease, background .18s ease, border-color .18s ease;
+}
+.btn:hover{ background: rgba(255,255,255,.12); }
+.btn:active{ transform: translateY(1px); }
+
+.btnPrimary{
+  border: 1px solid rgba(124,58,237,.45);
+  background: linear-gradient(135deg, rgba(124,58,237,.95), rgba(6,182,212,.75));
+}
+.btnPrimary:hover{
+  border-color: rgba(124,58,237,.70);
+  background: linear-gradient(135deg, rgba(124,58,237,1), rgba(6,182,212,.85));
+}
+
+.btnDanger{
+  border: 1px solid rgba(239,68,68,.45);
+  background: rgba(239,68,68,.10);
+}
+
+.grid{
+  display:grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  margin-top: 14px;
+}
+@media (max-width: 720px){
+  .grid{ grid-template-columns: 1fr; }
+}
+
+.linkCard{
+  display:block;
+  padding: 14px;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: rgba(255,255,255,.06);
+  text-decoration:none;
+  transition: transform .10s ease, background .18s ease, border-color .18s ease;
+}
+.linkCard:hover{
+  transform: translateY(-1px);
+  background: rgba(255,255,255,.10);
+  border-color: rgba(255,255,255,.22);
+}
+.linkTitle{ font-weight: 800; margin:0; }
+.linkDesc{ margin: 6px 0 0; color: var(--muted); font-size: 13px; }
+
+.footerNote{
+  margin-top: 14px;
+  color: rgba(234,240,255,.55);
+  font-size: 12px;
+}
+
+.nav{
+  display:flex;
+  gap:10px;
+  flex-wrap:wrap;
+  margin-top: 12px;
+}
+.pill{
+  display:inline-flex;
+  align-items:center;
+  gap:8px;
+  padding: 9px 12px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: rgba(255,255,255,.06);
+  text-decoration:none;
+  color: var(--text);
+}
+.pill:hover{ background: rgba(255,255,255,.10); }
