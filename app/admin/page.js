@@ -6,42 +6,53 @@ import { supabase } from '../../lib/supabaseClient'
 
 export default function AdminPage() {
   const [user, setUser] = useState(null)
+  const [loading, setLoading] = useState(true)
+
   const [isAdmin, setIsAdmin] = useState(false)
   const [matches, setMatches] = useState([])
   const [draftScores, setDraftScores] = useState({}) // { [matchId]: { home: '', away: '' } }
-  const [msg, setMsg] = useState('Loading...')
+  const [msg, setMsg] = useState('')
 
   useEffect(() => {
     ;(async () => {
+      setLoading(true)
+      setMsg('')
+
       const { data } = await supabase.auth.getUser()
       const u = data?.user ?? null
       setUser(u)
 
       if (!u) {
-        setMsg('Please sign in first.')
+        // Discreet: don’t reveal “admin page exists”
+        setMsg('Not found.')
+        setLoading(false)
         return
       }
 
-      const { data: adminRow, error: adminErr } = await supabase
-        .from('admin_emails')
-        .select('email')
-        .eq('email', u.email)
+      // ✅ Admin check via profiles.is_admin (reliable, no separate admin_emails table)
+      const { data: prof, error: profErr } = await supabase
+        .from('profiles')
+        .select('is_admin')
+        .eq('user_id', u.id)
         .maybeSingle()
 
-      if (adminErr) {
-        setMsg(adminErr.message)
+      if (profErr) {
+        // Still discreet
+        setMsg('Not found.')
+        setLoading(false)
         return
       }
 
-      if (!adminRow) {
+      if (!prof?.is_admin) {
         setIsAdmin(false)
-        setMsg('Not authorized (admin only).')
+        setMsg('Not found.')
+        setLoading(false)
         return
       }
 
       setIsAdmin(true)
       await loadMatches()
-      setMsg('')
+      setLoading(false)
     })()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
@@ -59,6 +70,7 @@ export default function AdminPage() {
         away:away_team_id ( name )
       `)
       .order('group_id', { ascending: true })
+      .order('id', { ascending: true })
 
     if (error) {
       setMsg(error.message)
@@ -77,6 +89,7 @@ export default function AdminPage() {
       }
     }
     setDraftScores(initialDraft)
+    setMsg('')
   }
 
   function setDraft(matchId, side, value) {
@@ -121,7 +134,7 @@ export default function AdminPage() {
       )
     )
 
-    setMsg('Saved ✅ (Scores are stored, but standings uses FINALIZED matches.)')
+    setMsg('Saved ✅ (Standings uses FINALIZED matches.)')
   }
 
   async function finalizeMatch(matchId) {
@@ -131,7 +144,7 @@ export default function AdminPage() {
       return
     }
 
-    // Make sure scores are saved before finalizing
+    // Ensure scores saved first
     await saveMatch(matchId)
 
     setMsg('Finalizing...')
@@ -149,7 +162,7 @@ export default function AdminPage() {
       prev.map(x => (x.id === matchId ? { ...x, is_final: true } : x))
     )
 
-    setMsg('Finalized ✅ (Now standings will update.)')
+    setMsg('Finalized ✅ (Now standings/leaderboard will update.)')
   }
 
   async function unfinalizeMatch(matchId) {
@@ -171,25 +184,29 @@ export default function AdminPage() {
     setMsg('Unfinalized ✅')
   }
 
-  if (!user) {
+  // ---------- DISCREET GATE ----------
+  if (loading) {
     return (
-      <main style={{ padding: 24 }}>
-        <h1>Admin</h1>
-        <p>{msg}</p>
+      <main className="container">
+        <div className="card"><p>Loading…</p></div>
       </main>
     )
   }
 
-  if (!isAdmin) {
+  if (!user || !isAdmin) {
     return (
-      <main style={{ padding: 24 }}>
-        <h1>Admin</h1>
-        <p>{msg}</p>
-        <p><a href="/">← Back to Home</a></p>
+      <main className="container">
+        <div className="card">
+          <p style={{ margin: 0 }}>{msg || 'Not found.'}</p>
+          <div className="nav" style={{ marginTop: 12 }}>
+            <a className="pill" href="/">🏠 Main Menu</a>
+          </div>
+        </div>
       </main>
     )
   }
 
+  // ---------- ADMIN UI ----------
   return (
     <main style={{ padding: 24 }}>
       {/* NAV */}
@@ -197,13 +214,14 @@ export default function AdminPage() {
         <a href="/">Home</a>
         <a href="/picks">Picks</a>
         <a href="/standings">Standings</a>
+        <a href="/leaderboard">Leaderboard</a>
         <button onClick={loadMatches}>Refresh</button>
       </div>
 
       <h1>Admin — Enter Match Results</h1>
 
       <p style={{ fontSize: 12, opacity: 0.75, marginTop: 6 }}>
-        Important: typing does not auto-save. Click <strong>Save</strong>. Standings update only after <strong>Finalize</strong>.
+        Typing does not auto-save. Click <strong>Save</strong>. Standings/leaderboard update only after <strong>Finalize</strong>.
       </p>
 
       {msg && <p style={{ marginTop: 10 }}>{msg}</p>}
