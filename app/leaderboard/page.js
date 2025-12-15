@@ -20,25 +20,46 @@ export default function LeaderboardPage() {
     const { data: auth } = await supabase.auth.getUser()
     setMe(auth?.user ?? null)
 
-    const res = await supabase
-      .from('leaderboard')
-      .select('*')
-      .order('points', { ascending: false })
+    // Expect a view/table named leaderboard OR leaderboard_view
+    const candidates = ['leaderboard', 'leaderboard_view']
 
-    if (res.error) {
-      setMsg(res.error.message)
-      setRows([])
-      setLoading(false)
-      return
+    for (const name of candidates) {
+      const res = await supabase.from(name).select('*').order('points', { ascending: false })
+      if (!res.error) {
+        const base = res.data || []
+
+        // Pull profiles for display_name
+        const userIds = [...new Set(base.map(r => r.user_id).filter(Boolean))]
+        let profileMap = {}
+
+        if (userIds.length) {
+          const { data: profs } = await supabase
+            .from('profiles')
+            .select('user_id, display_name')
+            .in('user_id', userIds)
+
+          for (const p of profs || []) profileMap[p.user_id] = p.display_name
+        }
+
+        const normalized = base.map(r => {
+          const user_id = r.user_id ?? r.userid ?? r.id ?? r.user
+          const nameFromProfile = (profileMap[user_id] || '').trim()
+
+          return {
+            user_id,
+            name: nameFromProfile || r.name || r.email || 'Unknown',
+            points: r.points ?? r.total_points ?? 0
+          }
+        })
+
+        setRows(normalized)
+        setLoading(false)
+        return
+      }
     }
 
-    const normalized = (res.data || []).map(r => ({
-      user_id: r.user_id ?? r.userid ?? r.id ?? r.user,
-      name: r.name ?? r.display_name ?? r.username ?? r.email ?? 'Unknown',
-      points: r.points ?? r.total_points ?? 0
-    }))
-
-    setRows(normalized)
+    setRows([])
+    setMsg('Could not load leaderboard (missing leaderboard table/view).')
     setLoading(false)
   }
 
@@ -55,7 +76,7 @@ export default function LeaderboardPage() {
       <div className="nav">
         <a className="pill" href="/">🏠 Main Menu</a>
         <a className="pill" href="/standings">📊 Standings</a>
-        <a className="pill" href="/picks">👉 Group Picks</a>
+        <a className="pill" href="/profile">👤 My Profile</a>
       </div>
 
       <h1 className="h1" style={{ marginTop: 16 }}>Leaderboard</h1>
@@ -63,20 +84,13 @@ export default function LeaderboardPage() {
       {msg && (
         <div className="card" style={{ marginTop: 14 }}>
           <p style={{ marginTop: 0, fontWeight: 800 }}>Leaderboard error:</p>
-          <p style={{ marginBottom: 0, opacity: 0.85 }}>
-            {msg}
-          </p>
-          <p style={{ marginTop: 10, fontSize: 12, opacity: 0.7 }}>
-            If this says the table/view doesn’t exist, create a Supabase VIEW called <strong>leaderboard</strong>.
-          </p>
+          <p style={{ marginBottom: 0, opacity: 0.85 }}>{msg}</p>
         </div>
       )}
 
       {!msg && rows.length === 0 && (
         <div className="card" style={{ marginTop: 14 }}>
-          <p style={{ margin: 0 }}>
-            No leaderboard data yet.
-          </p>
+          <p style={{ margin: 0 }}>No leaderboard data yet.</p>
         </div>
       )}
 
@@ -84,7 +98,6 @@ export default function LeaderboardPage() {
         <div className="card" style={{ marginTop: 18 }}>
           {rows.map((r, idx) => {
             const isMe = me?.id && r.user_id === me.id
-
             return (
               <a
                 key={r.user_id || idx}
@@ -96,9 +109,9 @@ export default function LeaderboardPage() {
                   marginTop: idx === 0 ? 0 : 8,
                   borderRadius: 12,
                   textDecoration: 'none',
-                  fontWeight: 800,
-                  background: isMe ? 'rgba(250,204,21,.22)' : 'rgba(255,255,255,.05)',
-                  outline: isMe ? '2px solid rgba(250,204,21,.5)' : '1px solid rgba(255,255,255,.1)',
+                  fontWeight: 900,
+                  background: isMe ? 'rgba(34,197,94,.14)' : 'rgba(255,255,255,.05)',
+                  outline: isMe ? '2px solid rgba(34,197,94,.35)' : '1px solid rgba(255,255,255,.10)',
                   color: '#fff'
                 }}
               >
