@@ -19,22 +19,32 @@ export default function PicksPage() {
     if (!auth?.user) return
     setUser(auth.user)
 
-    const { data: groupData } = await supabase
+    const { data: groupData, error: gErr } = await supabase
       .from('groups')
       .select('id, name, teams(id, name)')
       .order('name')
 
-    const { data: pickData } = await supabase
+    if (gErr) {
+      setMsg(gErr.message)
+      return
+    }
+
+    const { data: pickData, error: pErr } = await supabase
       .from('group_picks')
-      .select('group_id, team_id, rank, submitted_at')
+      .select('group_id, team_id, position, submitted_at')
       .eq('user_id', auth.user.id)
+
+    if (pErr) {
+      setMsg(pErr.message)
+      return
+    }
 
     setGroups(groupData || [])
 
     const map = {}
     let sub = null
     pickData?.forEach(p => {
-      map[`${p.group_id}-${p.rank}`] = p.team_id
+      map[`${p.group_id}-${p.position}`] = p.team_id
       if (p.submitted_at) sub = p.submitted_at
     })
 
@@ -49,12 +59,12 @@ export default function PicksPage() {
     setMsg('Saving...')
 
     const rows = Object.entries(picks).map(([key, teamId]) => {
-      const [group_id, rank] = key.split('-')
+      const [group_id, position] = key.split('-')
       return {
         user_id: user.id,
-        group_id: Number(group_id),
-        team_id: Number(teamId),
-        rank: Number(rank),
+        group_id,                 // text like "A"
+        team_id: teamId,          // uuid string
+        position: Number(position),
         submitted_at: null
       }
     })
@@ -67,8 +77,8 @@ export default function PicksPage() {
     if (!user || locked) return
 
     for (const g of groups) {
-      for (let r = 1; r <= g.teams.length; r++) {
-        if (!picks[`${g.id}-${r}`]) {
+      for (let pos = 1; pos <= g.teams.length; pos++) {
+        if (!picks[`${g.id}-${pos}`]) {
           setMsg('Please complete all group rankings before submitting.')
           return
         }
@@ -78,12 +88,12 @@ export default function PicksPage() {
     const now = new Date().toISOString()
 
     const rows = Object.entries(picks).map(([key, teamId]) => {
-      const [group_id, rank] = key.split('-')
+      const [group_id, position] = key.split('-')
       return {
         user_id: user.id,
-        group_id: Number(group_id),
-        team_id: Number(teamId),
-        rank: Number(rank),
+        group_id,                 // text like "A"
+        team_id: teamId,          // uuid string
+        position: Number(position),
         submitted_at: now
       }
     })
@@ -121,22 +131,22 @@ export default function PicksPage() {
           <h2 className="cardTitle">{group.name}</h2>
           <p className="cardSub">Rank teams from 1st to last</p>
 
-          {group.teams.map((team, index) => {
-            const rank = index + 1
+          {group.teams.map((_team, index) => {
+            const position = index + 1
             return (
-              <div key={team.id} style={{ marginBottom: 8 }}>
+              <div key={position} style={{ marginBottom: 8 }}>
                 <select
                   className="field"
                   disabled={locked}
-                  value={picks[`${group.id}-${rank}`] || ''}
+                  value={picks[`${group.id}-${position}`] || ''}
                   onChange={e =>
                     setPicks(prev => ({
                       ...prev,
-                      [`${group.id}-${rank}`]: e.target.value
+                      [`${group.id}-${position}`]: e.target.value
                     }))
                   }
                 >
-                  <option value="">Rank {rank}</option>
+                  <option value="">Rank {position}</option>
                   {group.teams.map(t => (
                     <option key={t.id} value={t.id}>
                       {t.name}
@@ -160,4 +170,3 @@ export default function PicksPage() {
     </div>
   )
 }
-
