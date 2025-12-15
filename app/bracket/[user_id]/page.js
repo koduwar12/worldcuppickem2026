@@ -126,6 +126,56 @@ export default function ViewBracketPage() {
         {displayName}’s Bracket
       </h1>
       <p className="sub">Group stage picks (read-only)</p>
+<div
+  className="card"
+  style={{
+    marginTop: 12,
+    padding: 14,
+    display: 'flex',
+    flexWrap: 'wrap',
+    gap: 10,
+    alignItems: 'center'
+  }}
+>
+  <strong style={{ marginRight: 6 }}>Legend:</strong>
+
+  <span
+    style={{
+      padding: '6px 10px',
+      borderRadius: 999,
+      background: 'rgba(34,197,94,.22)',
+      border: '1px solid rgba(34,197,94,.45)',
+      fontWeight: 800
+    }}
+  >
+    ✅ Exact spot (+5)
+  </span>
+
+  <span
+    style={{
+      padding: '6px 10px',
+      borderRadius: 999,
+      background: 'rgba(56,189,248,.18)',
+      border: '1px solid rgba(56,189,248,.35)',
+      fontWeight: 800
+    }}
+  >
+    🟦 Qualified wrong order (+2)
+  </span>
+
+  <span
+    style={{
+      padding: '6px 10px',
+      borderRadius: 999,
+      background: 'rgba(255,255,255,.06)',
+      border: '1px solid rgba(255,255,255,.12)',
+      fontWeight: 800
+    }}
+  >
+    ⬜ Not correct (+0) / Waiting for results
+  </span>
+</div>
+
 
       {msg && (
         <div className="card" style={{ marginTop: 12 }}>
