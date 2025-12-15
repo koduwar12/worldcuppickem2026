@@ -6,21 +6,20 @@ import { supabase } from '../../../lib/supabaseClient'
 
 export default function ViewBracketPage() {
   const params = useParams()
-  const userId = params?.user_id // comes from folder name [user_id]
+  const userId = params?.user_id
 
   const [loading, setLoading] = useState(true)
   const [msg, setMsg] = useState('')
   const [groups, setGroups] = useState([])
   const [picks, setPicks] = useState({})
+  const [scoreMap, setScoreMap] = useState({})
   const [profile, setProfile] = useState(null)
 
   useEffect(() => {
-    // Wait until the route param is actually available
     if (!userId || userId === 'undefined') {
       setLoading(false)
       return
     }
-
     load(userId)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [userId])
@@ -29,7 +28,7 @@ export default function ViewBracketPage() {
     setLoading(true)
     setMsg('')
 
-    // Load groups + teams
+    // groups + teams
     const { data: groupData, error: gErr } = await supabase
       .from('groups')
       .select('id, name, teams(id, name)')
@@ -41,7 +40,7 @@ export default function ViewBracketPage() {
       return
     }
 
-    // Load that user's submitted picks
+    // submitted picks (read-only)
     const { data: pickData, error: pErr } = await supabase
       .from('group_picks')
       .select('group_id, team_id, position, submitted_at')
@@ -54,35 +53,50 @@ export default function ViewBracketPage() {
       return
     }
 
-    // Optional: display name (won’t break if not found)
-    const { data: profileData } = await supabase
+    // score per pick (may be empty if no match results yet)
+    const { data: scoreData, error: sErr } = await supabase
+      .from('group_pick_scores')
+      .select('group_id, team_id, picked_position, actual_position, points_awarded, exact, qualified_wrong_order')
+      .eq('user_id', uid)
+
+    if (sErr) {
+      // Not fatal; bracket can still show. Just show a helpful message.
+      setMsg(`Scoring not available yet: ${sErr.message}`)
+    }
+
+    // profile name
+    const { data: prof } = await supabase
       .from('profiles')
       .select('display_name')
       .eq('user_id', uid)
       .maybeSingle()
 
-    const map = {}
-    pickData?.forEach(p => {
-      map[`${p.group_id}-${p.position}`] = p.team_id
+    // maps
+    const pickMap = {}
+    ;(pickData || []).forEach(p => {
+      pickMap[`${p.group_id}-${p.position}`] = p.team_id
+    })
+
+    const sMap = {}
+    ;(scoreData || []).forEach(s => {
+      sMap[`${s.group_id}-${s.picked_position}`] = s
     })
 
     setGroups(groupData || [])
-    setPicks(map)
-    setProfile(profileData || null)
+    setPicks(pickMap)
+    setScoreMap(sMap)
+    setProfile(prof || null)
     setLoading(false)
   }
 
   if (loading) {
     return (
       <div className="container">
-        <div className="card">
-          <p style={{ margin: 0, color: 'rgba(234,240,255,.75)' }}>Loading bracket…</p>
-        </div>
+        <div className="card"><p>Loading bracket…</p></div>
       </div>
     )
   }
 
-  // If userId is missing, it means the URL isn’t /bracket/<uuid>
   if (!userId || userId === 'undefined') {
     return (
       <div className="container">
@@ -97,26 +111,11 @@ export default function ViewBracketPage() {
     )
   }
 
-  if (msg) {
-    return (
-      <div className="container">
-        <div className="card">
-          <p style={{ marginTop: 0 }}>{msg}</p>
-          <div className="nav" style={{ marginTop: 10 }}>
-            <a className="pill" href="/leaderboard">🏆 Back to Leaderboard</a>
-            <a className="pill" href="/">🏠 Main Menu</a>
-          </div>
-        </div>
-      </div>
-    )
-  }
-
   const displayName =
     profile?.display_name?.trim() || `User ${String(userId).slice(0, 6)}`
 
   return (
     <div className="container">
-      {/* ---------- NAV ---------- */}
       <div className="nav">
         <a className="pill" href="/">🏠 Main Menu</a>
         <a className="pill" href="/leaderboard">🏆 Leaderboard</a>
@@ -128,9 +127,9 @@ export default function ViewBracketPage() {
       </h1>
       <p className="sub">Group stage picks (read-only)</p>
 
-      {Object.keys(picks).length === 0 && (
-        <div className="badge" style={{ marginTop: 10 }}>
-          No submitted picks found for this user yet.
+      {msg && (
+        <div className="card" style={{ marginTop: 12 }}>
+          <p style={{ margin: 0, opacity: 0.85 }}>{msg}</p>
         </div>
       )}
 
@@ -142,24 +141,67 @@ export default function ViewBracketPage() {
             const pickedTeamId = picks[`${group.id}-${position}`]
             const pickedTeam = group.teams.find(t => t.id === pickedTeamId)
 
+            const score = scoreMap[`${group.id}-${position}`]
+            const isExact = !!score?.exact
+            const isQualWrong = !!score?.qualified_wrong_order
+            const pts = score?.points_awarded ?? null
+
+            // color logic:
+            // exact = green
+            // qualified wrong order = teal
+            // wrong/unknown = default
+            const bg = isExact
+              ? 'rgba(34,197,94,.22)'
+              : isQualWrong
+              ? 'rgba(56,189,248,.18)'
+              : 'rgba(255,255,255,.06)'
+
+            const outline = isExact
+              ? '1px solid rgba(34,197,94,.45)'
+              : isQualWrong
+              ? '1px solid rgba(56,189,248,.35)'
+              : '1px solid rgba(255,255,255,.12)'
+
             return (
               <div
                 key={position}
                 style={{
-                  padding: 10,
-                  marginTop: 8,
-                  borderRadius: 12,
-                  background: 'rgba(255,255,255,.06)',
-                  border: '1px solid rgba(255,255,255,.12)',
+                  padding: 12,
+                  marginTop: 10,
+                  borderRadius: 14,
+                  background: bg,
+                  border: outline,
                   display: 'flex',
+                  alignItems: 'center',
                   justifyContent: 'space-between',
-                  gap: 10
+                  gap: 12
                 }}
               >
-                <span style={{ fontWeight: 900 }}>#{position}</span>
-                <span style={{ fontWeight: 750 }}>
-                  {pickedTeam ? pickedTeam.name : '—'}
-                </span>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                  <span style={{ fontWeight: 900 }}>#{position}</span>
+                  <span style={{ fontWeight: 800 }}>
+                    {pickedTeam ? pickedTeam.name : '—'}
+                  </span>
+                </div>
+
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                  {pts !== null && (
+                    <span
+                      style={{
+                        fontWeight: 900,
+                        padding: '6px 10px',
+                        borderRadius: 999,
+                        background: 'rgba(0,0,0,.25)',
+                        border: '1px solid rgba(255,255,255,.12)'
+                      }}
+                    >
+                      +{pts}
+                    </span>
+                  )}
+
+                  {isExact && <span title="Exact position">✅</span>}
+                  {isQualWrong && <span title="Qualified (wrong order)">🟦</span>}
+                </div>
               </div>
             )
           })}
