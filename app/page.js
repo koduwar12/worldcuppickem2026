@@ -13,30 +13,47 @@ export default function Home() {
       setLoading(false)
     })
 
-    const { data: listener } = supabase.auth.onAuthStateChange(
-      (_event, session) => {
-        setUser(session?.user ?? null)
-      }
-    )
+    const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => {
+      setUser(session?.user ?? null)
+    })
 
-    return () => {
-      listener.subscription.unsubscribe()
-    }
+    return () => listener.subscription.unsubscribe()
   }, [])
 
   if (loading) {
     return (
-      <main style={{ padding: 24 }}>
-        <p>Loading...</p>
-      </main>
+      <div className="container">
+        <div className="card">
+          <p style={{ margin: 0, color: 'rgba(234,240,255,.75)' }}>Loading…</p>
+        </div>
+      </div>
     )
   }
 
   return (
-    <main style={{ padding: 24 }}>
-      <h1>World Cup Pick’em 2026</h1>
-      {!user ? <Auth /> : <Dashboard user={user} />}
-    </main>
+    <div className="container">
+      <div className="hero">
+        <div>
+          <h1 className="h1">World Cup Pick’em 2026</h1>
+          <p className="sub">
+            Friends & family bracket challenge — pick groups, track standings, climb the leaderboard.
+          </p>
+          <div className="nav">
+            <span className="badge">⚽ Built for June kick-off</span>
+            <span className="badge">🔒 Picks lock on submit</span>
+            <span className="badge">📊 Live standings (finalized games)</span>
+          </div>
+        </div>
+      </div>
+
+      <div className="card">
+        {!user ? <Auth /> : <Dashboard user={user} />}
+      </div>
+
+      <div className="footerNote">
+        Tip: set a display name on the leaderboard so everyone recognizes you.
+      </div>
+    </div>
   )
 }
 
@@ -46,39 +63,51 @@ function Auth() {
   const [msg, setMsg] = useState('')
 
   async function signUp() {
-    const { error } = await supabase.auth.signUp({ email, password })
+    const e = email.trim()
+    const p = password.trim()
+    if (!e || !p) return setMsg('Please enter an email and password.')
+
+    const { error } = await supabase.auth.signUp({ email: e, password: p })
     setMsg(error ? error.message : 'Account created — you can sign in')
   }
 
   async function signIn() {
-    const { error } = await supabase.auth.signInWithPassword({ email, password })
+    const e = email.trim()
+    const p = password.trim()
+    if (!e || !p) return setMsg('Please enter an email and password.')
+
+    const { error } = await supabase.auth.signInWithPassword({ email: e, password: p })
     setMsg(error ? error.message : '')
   }
 
   return (
-    <div style={{ maxWidth: 360 }}>
-      <input
-        type="email"
-        placeholder="Email"
-        value={email}
-        onChange={e => setEmail(e.target.value)}
-        style={{ width: '100%', padding: 8, marginBottom: 8 }}
-      />
+    <div style={{ maxWidth: 420 }}>
+      <h2 className="cardTitle">Sign in</h2>
+      <p className="cardSub">Use your email + password.</p>
 
-      <input
-        type="password"
-        placeholder="Password"
-        value={password}
-        onChange={e => setPassword(e.target.value)}
-        style={{ width: '100%', padding: 8, marginBottom: 8 }}
-      />
-
-      <div style={{ display: 'flex', gap: 8 }}>
-        <button onClick={signUp}>Sign Up</button>
-        <button onClick={signIn}>Sign In</button>
+      <div className="row" style={{ flexDirection: 'column' }}>
+        <input
+          className="field"
+          type="email"
+          placeholder="Email"
+          value={email}
+          onChange={e => setEmail(e.target.value)}
+        />
+        <input
+          className="field"
+          type="password"
+          placeholder="Password"
+          value={password}
+          onChange={e => setPassword(e.target.value)}
+        />
       </div>
 
-      {msg && <p style={{ marginTop: 8 }}>{msg}</p>}
+      <div className="row" style={{ marginTop: 12 }}>
+        <button className="btn btnPrimary" onClick={signIn}>Sign In</button>
+        <button className="btn" onClick={signUp}>Sign Up</button>
+      </div>
+
+      {msg && <p style={{ marginTop: 12, color: 'rgba(234,240,255,.80)' }}>{msg}</p>}
     </div>
   )
 }
@@ -88,36 +117,39 @@ function Dashboard({ user }) {
     await supabase.auth.signOut()
   }
 
-  const linkStyle = {
-    padding: 10,
-    border: '1px solid #000',
-    textAlign: 'center',
-    textDecoration: 'none'
-  }
-
   return (
-    <div style={{ marginTop: 16 }}>
-      <p>Welcome! ⚽</p>
-      <p style={{ fontSize: 12, opacity: 0.7 }}>
-        Logged in as {user.email}
-      </p>
+    <div>
+      <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
+        <div>
+          <h2 className="cardTitle">Welcome ⚽</h2>
+          <p className="cardSub" style={{ marginBottom: 0 }}>
+            Logged in as <span style={{ color: 'rgba(234,240,255,.90)' }}>{user.email}</span>
+          </p>
+        </div>
 
-      <div
-        style={{
-          marginTop: 16,
-          display: 'flex',
-          flexDirection: 'column',
-          gap: 12,
-          maxWidth: 260
-        }}
-      >
-        <a href="/picks" style={linkStyle}>👉 Go to Group Picks</a>
-        <a href="/standings" style={linkStyle}>📊 View Standings</a>
-        <a href="/leaderboard" style={linkStyle}>🏆 View Leaderboard</a>
+        <button className="btn btnDanger" onClick={logout}>Log out</button>
+      </div>
 
-        <a href="/admin" style={linkStyle}>🛠 Admin: Group Match Results</a>
+      <div className="grid">
+        <a className="linkCard" href="/picks">
+          <p className="linkTitle">👉 Group Picks</p>
+          <p className="linkDesc">Submit your group rankings (locks after submit).</p>
+        </a>
 
-        <button onClick={logout}>Log out</button>
+        <a className="linkCard" href="/standings">
+          <p className="linkTitle">📊 Standings</p>
+          <p className="linkDesc">Live group tables from finalized matches.</p>
+        </a>
+
+        <a className="linkCard" href="/leaderboard">
+          <p className="linkTitle">🏆 Leaderboard</p>
+          <p className="linkDesc">See who’s winning and open brackets.</p>
+        </a>
+
+        <a className="linkCard" href="/admin">
+          <p className="linkTitle">🛠 Admin</p>
+          <p className="linkDesc">Enter match results (finalize games).</p>
+        </a>
       </div>
     </div>
   )
