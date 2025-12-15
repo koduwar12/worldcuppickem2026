@@ -13,6 +13,10 @@ export default function AdminPage() {
   const [draftScores, setDraftScores] = useState({}) // { [matchId]: { home: '', away: '' } }
   const [msg, setMsg] = useState('')
 
+  // Modal state
+  const [confirm, setConfirm] = useState(null)
+  // confirm = { title, body, actionLabel, tone, onConfirm }
+
   useEffect(() => {
     ;(async () => {
       setLoading(true)
@@ -28,7 +32,6 @@ export default function AdminPage() {
         return
       }
 
-      // Admin check via profiles.is_admin
       const { data: prof, error: profErr } = await supabase
         .from('profiles')
         .select('is_admin')
@@ -101,8 +104,8 @@ export default function AdminPage() {
     return map
   }, [matches])
 
-  async function saveMatch(matchId) {
-    setMsg('Saving...')
+  async function saveMatch(matchId, silent = false) {
+    if (!silent) setMsg('Saving...')
     const draft = draftScores[matchId] ?? { home: '', away: '' }
 
     const homeVal = draft.home === '' ? null : Number(draft.home)
@@ -114,8 +117,8 @@ export default function AdminPage() {
       .eq('id', matchId)
 
     if (error) {
-      setMsg(`Save failed: ${error.message}`)
-      return
+      if (!silent) setMsg(`Save failed: ${error.message}`)
+      return { ok: false, error }
     }
 
     setMatches(prev =>
@@ -124,17 +127,23 @@ export default function AdminPage() {
       )
     )
 
-    setMsg('Saved ✅ (Standings/leaderboard update only after Finalize.)')
+    if (!silent) setMsg('Saved ✅ (Standings/leaderboard update only after Finalize.)')
+    return { ok: true }
   }
 
-  async function finalizeMatch(matchId) {
+  async function doFinalize(matchId) {
     const draft = draftScores[matchId] ?? { home: '', away: '' }
     if (draft.home === '' || draft.away === '') {
       setMsg('Enter BOTH scores, click Save, then Finalize.')
       return
     }
 
-    await saveMatch(matchId)
+    // Save first (quietly)
+    const saved = await saveMatch(matchId, true)
+    if (!saved.ok) {
+      setMsg(`Save failed: ${saved.error.message}`)
+      return
+    }
 
     setMsg('Finalizing...')
     const { error } = await supabase
@@ -147,14 +156,11 @@ export default function AdminPage() {
       return
     }
 
-    setMatches(prev =>
-      prev.map(x => (x.id === matchId ? { ...x, is_final: true } : x))
-    )
-
+    setMatches(prev => prev.map(x => (x.id === matchId ? { ...x, is_final: true } : x)))
     setMsg('Finalized ✅')
   }
 
-  async function unfinalizeMatch(matchId) {
+  async function doUnfinalize(matchId) {
     setMsg('Unfinalizing...')
     const { error } = await supabase
       .from('matches')
@@ -166,14 +172,11 @@ export default function AdminPage() {
       return
     }
 
-    setMatches(prev =>
-      prev.map(x => (x.id === matchId ? { ...x, is_final: false } : x))
-    )
-
+    setMatches(prev => prev.map(x => (x.id === matchId ? { ...x, is_final: false } : x)))
     setMsg('Unfinalized ✅')
   }
 
-  // --------- DISCREET GATE ----------
+  // ---------- DISCREET GATE ----------
   if (loading) {
     return (
       <main className="container">
@@ -231,25 +234,42 @@ export default function AdminPage() {
               const draft = draftScores[m.id] ?? { home: '', away: '' }
               const canFinalize = draft.home !== '' && draft.away !== ''
 
+              const finalBadge = (
+                <span
+                  style={{
+                    fontSize: 12,
+                    fontWeight: 900,
+                    padding: '4px 10px',
+                    borderRadius: 999,
+                    background: m.is_final ? 'rgba(34,197,94,.18)' : 'rgba(255,255,255,.10)',
+                    border: m.is_final ? '1px solid rgba(34,197,94,.35)' : '1px solid rgba(255,255,255,.10)',
+                    color: '#fff'
+                  }}
+                >
+                  {m.is_final ? '✅ FINAL' : 'Draft'}
+                </span>
+              )
+
               return (
                 <div
                   key={m.id}
                   style={{
                     padding: 12,
                     borderRadius: 14,
-                    border: '1px solid rgba(255,255,255,.10)',
+                    border: m.is_final
+                      ? '1px solid rgba(34,197,94,.30)'
+                      : '1px solid rgba(255,255,255,.10)',
                     marginTop: 10,
-                    background: 'rgba(255,255,255,.03)'
+                    background: m.is_final
+                      ? 'rgba(34,197,94,.06)'
+                      : 'rgba(255,255,255,.03)'
                   }}
                 >
-                  <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'center' }}>
                     <div style={{ fontWeight: 900 }}>
                       {m.home?.name} vs {m.away?.name}
                     </div>
-
-                    <div style={{ fontSize: 12, opacity: 0.8, fontWeight: 800 }}>
-                      {m.is_final ? '✅ Final' : 'Draft'}
-                    </div>
+                    {finalBadge}
                   </div>
 
                   <div
@@ -293,12 +313,39 @@ export default function AdminPage() {
                       <button
                         className="btn btnPrimary"
                         disabled={!canFinalize}
-                        onClick={() => finalizeMatch(m.id)}
+                        onClick={() => {
+                          setConfirm({
+                            title: 'Finalize this match?',
+                            body:
+                              'Finalizing will update standings/leaderboard. You can still Unfinalize later, but do this only when the score is correct.',
+                            actionLabel: 'Yes, Finalize',
+                            tone: 'primary',
+                            onConfirm: async () => {
+                              setConfirm(null)
+                              await doFinalize(m.id)
+                            }
+                          })
+                        }}
                       >
                         Finalize
                       </button>
                     ) : (
-                      <button className="btn" onClick={() => unfinalizeMatch(m.id)}>
+                      <button
+                        className="btn"
+                        onClick={() => {
+                          setConfirm({
+                            title: 'Unfinalize this match?',
+                            body:
+                              'This will mark the match as not final. Standings/leaderboard may change after you re-finalize.',
+                            actionLabel: 'Yes, Unfinalize',
+                            tone: 'danger',
+                            onConfirm: async () => {
+                              setConfirm(null)
+                              await doUnfinalize(m.id)
+                            }
+                          })
+                        }}
+                      >
                         Unfinalize
                       </button>
                     )}
@@ -315,6 +362,53 @@ export default function AdminPage() {
           </div>
         </section>
       ))}
+
+      {/* ---------- CONFIRM MODAL ---------- */}
+      {confirm && (
+        <div
+          onClick={() => setConfirm(null)}
+          style={{
+            position: 'fixed',
+            inset: 0,
+            background: 'rgba(0,0,0,.55)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: 16,
+            zIndex: 9999
+          }}
+        >
+          <div
+            className="card"
+            onClick={e => e.stopPropagation()}
+            style={{
+              width: '100%',
+              maxWidth: 520
+            }}
+          >
+            <h2 className="cardTitle" style={{ marginTop: 0 }}>{confirm.title}</h2>
+            <p className="cardSub" style={{ marginTop: 8 }}>{confirm.body}</p>
+
+            <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', marginTop: 16 }}>
+              <button className="btn" onClick={() => setConfirm(null)}>
+                Cancel
+              </button>
+
+              <button
+                className={confirm.tone === 'danger' ? 'btn' : 'btn btnPrimary'}
+                onClick={confirm.onConfirm}
+                style={
+                  confirm.tone === 'danger'
+                    ? { border: '1px solid rgba(255,80,80,.45)' }
+                    : undefined
+                }
+              >
+                {confirm.actionLabel}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </main>
   )
 }
