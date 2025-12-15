@@ -13,27 +13,23 @@ const ROUND_LABEL = {
 }
 const ROUND_MATCH_COUNTS = { R32: 16, R16: 8, QF: 4, SF: 2, F: 1 }
 
-// Layout tuning (you can tweak these later)
 const COL_WIDTH = 240
 const COL_GAP = 70
-const UNIT = 26 // vertical unit
-const TOTAL_ROWS = 32 // for Round of 32 bracket scaffold
+const UNIT = 26
+const TOTAL_ROWS = 32
 const HEIGHT = TOTAL_ROWS * UNIT
 const CARD_H = 74
 
 function buildRoundMap(matches) {
   const map = {}
   for (const r of ROUND_ORDER) map[r] = []
-
   for (const m of matches || []) {
     if (!map[m.round]) map[m.round] = []
     map[m.round].push(m)
   }
-
   for (const r of ROUND_ORDER) {
     map[r].sort((a, b) => (a.match_no ?? 0) - (b.match_no ?? 0))
   }
-
   return map
 }
 
@@ -71,14 +67,11 @@ function winnerTeamId(match) {
   const hs = match.home_score
   const as = match.away_score
   if (hs === null || hs === undefined || as === null || as === undefined) return null
-  if (hs === as) return null // knockout shouldn’t draw, but just in case
+  if (hs === as) return null
   return hs > as ? match.home?.id || match.home_team_id : match.away?.id || match.away_team_id
 }
 
 function centerRow(roundIndex, matchNo) {
-  // matchNo starts at 1
-  // roundIndex: 0=R32, 1=R16, 2=QF, 3=SF, 4=F
-  // Center rows: (2*matchNo-1) * 2^roundIndex
   const mult = Math.pow(2, roundIndex)
   return (2 * matchNo - 1) * mult
 }
@@ -102,45 +95,35 @@ function getTeamName(obj) {
 
 export default function KnockoutBracket({
   matches,
-  selections, // { [matchId]: teamId }
+  selections,
   locked = false,
-  onSelect, // (matchId, teamId) => void
-  mode = 'picks', // 'picks' | 'view'
-  subtitle, // optional
+  onSelect,
+  mode = 'picks',
+  subtitle,
   showWinnerColumn = true
 }) {
   const roundMap = ensureSlots(buildRoundMap(matches))
   const roundsToRender = showWinnerColumn ? [...ROUND_ORDER, 'W'] : [...ROUND_ORDER]
-
   const totalCols = roundsToRender.length
   const innerWidth = (totalCols - 1) * (COL_WIDTH + COL_GAP) + COL_WIDTH
 
-  // Build connector lines between actual rounds only (R32->R16->QF->SF->F->W)
   const paths = []
-
   for (let rIndex = 0; rIndex < ROUND_ORDER.length - 1; rIndex++) {
     const fromRound = ROUND_ORDER[rIndex]
-    const toRound = ROUND_ORDER[rIndex + 1]
-    const fromMatches = roundMap[fromRound] || []
-    const toMatches = roundMap[toRound] || []
-
     const x1 = colX(rIndex) + COL_WIDTH
     const x2 = colX(rIndex + 1)
 
+    const fromMatches = roundMap[fromRound] || []
     for (const m of fromMatches) {
       const fromNo = m.match_no || 1
       const toNo = Math.ceil(fromNo / 2)
       const y1 = cardCenterY(rIndex, fromNo)
       const y2 = cardCenterY(rIndex + 1, toNo)
-
-      // Only draw if the target slot exists (it will, due to ensureSlots)
       const midX = x1 + COL_GAP / 2
-      const d = `M ${x1} ${y1} H ${midX} V ${y2} H ${x2}`
-      paths.push(d)
+      paths.push(`M ${x1} ${y1} H ${midX} V ${y2} H ${x2}`)
     }
   }
 
-  // Final -> Winner connector (single line)
   if (showWinnerColumn) {
     const finalX1 = colX(ROUND_ORDER.length - 1) + COL_WIDTH
     const winX2 = colX(ROUND_ORDER.length)
@@ -149,11 +132,9 @@ export default function KnockoutBracket({
     paths.push(`M ${finalX1} ${y} H ${midX} H ${winX2}`)
   }
 
-  // Winner card data
   const finalMatch = (roundMap.F || [])[0]
   const actualWinnerId = winnerTeamId(finalMatch)
-  const pickedWinnerId =
-    finalMatch?.id && selections ? selections[finalMatch.id] : null
+  const pickedWinnerId = finalMatch?.id && selections ? selections[finalMatch.id] : null
 
   const winnerName =
     (actualWinnerId &&
@@ -176,7 +157,7 @@ export default function KnockoutBracket({
     const matchNo = matchObj?.match_no || 1
     const home = matchObj?.home
     const away = matchObj?.away
-    const canPick = !!home?.id && !!away?.id && typeof matchId !== 'string' // ignore placeholder ids
+    const canPick = !!home?.id && !!away?.id && typeof matchId !== 'string'
 
     const pick = matchId && selections ? selections[matchId] : null
     const actual = winnerTeamId(matchObj)
@@ -247,9 +228,7 @@ export default function KnockoutBracket({
               value={pick ?? ''}
               onChange={e => onSelect && onSelect(matchId, e.target.value)}
             >
-              <option value="">
-                {canPick ? 'Pick winner…' : 'Teams not set'}
-              </option>
+              <option value="">{canPick ? 'Pick winner…' : 'Teams not set'}</option>
               {canPick && (
                 <>
                   <option value={home.id}>{home.name}</option>
@@ -262,7 +241,7 @@ export default function KnockoutBracket({
 
         {mode === 'view' && pick && (
           <div style={{ marginTop: 10, fontSize: 12, fontWeight: 900, opacity: 0.9 }}>
-            Pick:{" "}
+            Pick:{' '}
             {home?.id === pick ? home?.name : away?.id === pick ? away?.name : '—'}
             {isPickedCorrect && <span style={{ marginLeft: 8 }}>✅</span>}
             {isPickedWrong && <span style={{ marginLeft: 8 }}>❌</span>}
@@ -276,17 +255,10 @@ export default function KnockoutBracket({
     <div className="card" style={{ marginTop: 18, padding: 14 }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'baseline' }}>
         <div>
-          <div className="cardTitle" style={{ marginBottom: 4 }}>
-            Knockout Bracket
-          </div>
-          {subtitle ? (
-            <div style={{ fontSize: 13, opacity: 0.8 }}>{subtitle}</div>
-          ) : null}
+          <div className="cardTitle" style={{ marginBottom: 4 }}>Knockout Bracket</div>
+          {subtitle ? <div style={{ fontSize: 13, opacity: 0.8 }}>{subtitle}</div> : null}
         </div>
-
-        <div style={{ fontSize: 12, opacity: 0.75, fontWeight: 900 }}>
-          Mobile: scroll →
-        </div>
+        <div style={{ fontSize: 12, opacity: 0.75, fontWeight: 900 }}>Mobile: scroll →</div>
       </div>
 
       <div
@@ -300,15 +272,7 @@ export default function KnockoutBracket({
           background: 'rgba(0,0,0,.12)'
         }}
       >
-        <div
-          style={{
-            position: 'relative',
-            width: innerWidth,
-            height: HEIGHT,
-            padding: 16
-          }}
-        >
-          {/* Round headers */}
+        <div style={{ position: 'relative', width: innerWidth, height: HEIGHT, padding: 16 }}>
           {roundsToRender.map((r, idx) => (
             <div
               key={`hdr-${r}`}
@@ -326,42 +290,27 @@ export default function KnockoutBracket({
             </div>
           ))}
 
-          {/* Connector lines */}
           <svg
             width={innerWidth}
             height={HEIGHT}
-            style={{
-              position: 'absolute',
-              left: 0,
-              top: 0,
-              pointerEvents: 'none',
-              opacity: 0.55
-            }}
+            style={{ position: 'absolute', left: 0, top: 0, pointerEvents: 'none', opacity: 0.55 }}
           >
             {paths.map((d, i) => (
-              <path
-                key={i}
-                d={d}
-                fill="none"
-                stroke="rgba(255,255,255,.22)"
-                strokeWidth="2"
-              />
+              <path key={i} d={d} fill="none" stroke="rgba(255,255,255,.22)" strokeWidth="2" />
             ))}
           </svg>
 
-          {/* Match cards */}
           {ROUND_ORDER.map((r, rIndex) => {
             const list = roundMap[r] || []
             return list.map(m => renderMatchCard(r, rIndex, m))
           })}
 
-          {/* Winner column */}
           {showWinnerColumn && (
             <div
               style={{
                 position: 'absolute',
                 left: colX(ROUND_ORDER.length),
-                top: cardY(ROUND_ORDER.length - 1, 1), // align with final
+                top: cardY(ROUND_ORDER.length - 1, 1),
                 width: COL_WIDTH,
                 height: CARD_H,
                 padding: 12,
@@ -380,9 +329,7 @@ export default function KnockoutBracket({
               }}
             >
               <div style={{ fontSize: 12, opacity: 0.75, fontWeight: 900 }}>Winner</div>
-              <div style={{ marginTop: 8, fontWeight: 900, fontSize: 16 }}>
-                {winnerName}
-              </div>
+              <div style={{ marginTop: 8, fontWeight: 900, fontSize: 16 }}>{winnerName}</div>
               <div style={{ marginTop: 6, fontSize: 12, opacity: 0.8, fontWeight: 800 }}>
                 {actualWinnerId ? 'Based on final result' : pickedWinnerId ? 'Based on pick' : 'TBD'}
               </div>
