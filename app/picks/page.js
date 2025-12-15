@@ -19,30 +19,21 @@ export default function PicksPage() {
     if (!auth?.user) return
     setUser(auth.user)
 
-    const { data: groupData, error: gErr } = await supabase
+    const { data: groupData } = await supabase
       .from('groups')
       .select('id, name, teams(id, name)')
       .order('name')
 
-    if (gErr) {
-      setMsg(gErr.message)
-      return
-    }
-
-    const { data: pickData, error: pErr } = await supabase
+    const { data: pickData } = await supabase
       .from('group_picks')
-      .select('group_id, team_id, position, submitted_at')
+      .select('group_id, team_id, position, rank, submitted_at')
       .eq('user_id', auth.user.id)
-
-    if (pErr) {
-      setMsg(pErr.message)
-      return
-    }
 
     setGroups(groupData || [])
 
     const map = {}
     let sub = null
+
     pickData?.forEach(p => {
       map[`${p.group_id}-${p.position}`] = p.team_id
       if (p.submitted_at) sub = p.submitted_at
@@ -60,11 +51,13 @@ export default function PicksPage() {
 
     const rows = Object.entries(picks).map(([key, teamId]) => {
       const [group_id, position] = key.split('-')
+
       return {
         user_id: user.id,
-        group_id,                 // text like "A"
-        team_id: teamId,          // uuid string
+        group_id,
+        team_id: teamId,
         position: Number(position),
+        rank: Number(position), // satisfy NOT NULL constraint
         submitted_at: null
       }
     })
@@ -77,8 +70,8 @@ export default function PicksPage() {
     if (!user || locked) return
 
     for (const g of groups) {
-      for (let pos = 1; pos <= g.teams.length; pos++) {
-        if (!picks[`${g.id}-${pos}`]) {
+      for (let p = 1; p <= g.teams.length; p++) {
+        if (!picks[`${g.id}-${p}`]) {
           setMsg('Please complete all group rankings before submitting.')
           return
         }
@@ -89,11 +82,13 @@ export default function PicksPage() {
 
     const rows = Object.entries(picks).map(([key, teamId]) => {
       const [group_id, position] = key.split('-')
+
       return {
         user_id: user.id,
-        group_id,                 // text like "A"
-        team_id: teamId,          // uuid string
+        group_id,
+        team_id: teamId,
         position: Number(position),
+        rank: Number(position), // satisfy NOT NULL constraint
         submitted_at: now
       }
     })
@@ -106,20 +101,20 @@ export default function PicksPage() {
 
   return (
     <div className="container">
-      {/* ---------- TOP NAV ---------- */}
+      {/* ---------- NAV ---------- */}
       <div className="nav">
         <a className="pill" href="/">🏠 Main Menu</a>
         <a className="pill" href="/standings">📊 Standings</a>
         <a className="pill" href="/leaderboard">🏆 Leaderboard</a>
       </div>
 
-      <h1 className="h1" style={{ marginTop: 14 }}>Group Picks</h1>
+      <h1 className="h1" style={{ marginTop: 16 }}>Group Picks</h1>
       <p className="sub">
-        Rank teams in each group. Once submitted, picks are locked.
+        Rank teams in each group. Submitting locks your picks.
       </p>
 
       {locked && (
-        <div className="badge" style={{ marginTop: 10 }}>
+        <div className="badge">
           🔒 Submitted on {new Date(submittedAt).toLocaleString()}
         </div>
       )}
@@ -131,29 +126,30 @@ export default function PicksPage() {
           <h2 className="cardTitle">{group.name}</h2>
           <p className="cardSub">Rank teams from 1st to last</p>
 
-          {group.teams.map((_team, index) => {
+          {group.teams.map((team, index) => {
             const position = index + 1
+
             return (
-              <div key={position} style={{ marginBottom: 8 }}>
-                <select
-                  className="field"
-                  disabled={locked}
-                  value={picks[`${group.id}-${position}`] || ''}
-                  onChange={e =>
-                    setPicks(prev => ({
-                      ...prev,
-                      [`${group.id}-${position}`]: e.target.value
-                    }))
-                  }
-                >
-                  <option value="">Rank {position}</option>
-                  {group.teams.map(t => (
-                    <option key={t.id} value={t.id}>
-                      {t.name}
-                    </option>
-                  ))}
-                </select>
-              </div>
+              <select
+                key={team.id}
+                className="field"
+                disabled={locked}
+                value={picks[`${group.id}-${position}`] || ''}
+                onChange={e =>
+                  setPicks(prev => ({
+                    ...prev,
+                    [`${group.id}-${position}`]: e.target.value
+                  }))
+                }
+                style={{ marginBottom: 8 }}
+              >
+                <option value="">Rank {position}</option>
+                {group.teams.map(t => (
+                  <option key={t.id} value={t.id}>
+                    {t.name}
+                  </option>
+                ))}
+              </select>
             )
           })}
         </div>
