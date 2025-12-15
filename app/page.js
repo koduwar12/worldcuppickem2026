@@ -25,7 +25,9 @@ export default function Home() {
   if (loading) {
     return (
       <main className="container">
-        <div className="card"><p>Loading…</p></div>
+        <div className="card">
+          <p>Loading…</p>
+        </div>
       </main>
     )
   }
@@ -41,26 +43,56 @@ export default function Home() {
 /* ---------- AUTH ---------- */
 
 function Auth() {
+  const [name, setName] = useState('')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [msg, setMsg] = useState('')
+  const [mode, setMode] = useState('signin') // signin | signup
 
   async function signUp() {
-    const { error } = await supabase.auth.signUp({ email, password })
+    setMsg('Creating account…')
+
+    const { error } = await supabase.auth.signUp({
+      email,
+      password,
+      options: {
+        data: {
+          display_name: name
+        }
+      }
+    })
+
     setMsg(
       error
         ? error.message
-        : 'Check your email to verify your account, then come back and sign in.'
+        : 'Check your email to verify your account, then return and sign in.'
     )
   }
 
   async function signIn() {
+    setMsg('Signing in…')
     const { error } = await supabase.auth.signInWithPassword({ email, password })
     setMsg(error ? error.message : '')
   }
 
   return (
     <div className="card" style={{ maxWidth: 460 }}>
+      <h2 className="cardTitle" style={{ marginTop: 0 }}>
+        {mode === 'signup' ? 'Create Account' : 'Sign In'}
+      </h2>
+
+      {mode === 'signup' && (
+        <>
+          <input
+            className="field"
+            placeholder="Name"
+            value={name}
+            onChange={e => setName(e.target.value)}
+          />
+          <div style={{ height: 10 }} />
+        </>
+      )}
+
       <input
         className="field"
         type="email"
@@ -69,6 +101,7 @@ function Auth() {
         onChange={e => setEmail(e.target.value)}
       />
       <div style={{ height: 10 }} />
+
       <input
         className="field"
         type="password"
@@ -76,11 +109,38 @@ function Auth() {
         value={password}
         onChange={e => setPassword(e.target.value)}
       />
-      <div style={{ height: 12 }} />
+      <div style={{ height: 14 }} />
+
       <div style={{ display: 'flex', gap: 10 }}>
-        <button className="btn" onClick={signUp}>Sign Up</button>
-        <button className="btn btnPrimary" onClick={signIn}>Sign In</button>
+        {mode === 'signup' ? (
+          <button
+            className="btn btnPrimary"
+            onClick={signUp}
+            disabled={!name || !email || !password}
+          >
+            Sign Up
+          </button>
+        ) : (
+          <button
+            className="btn btnPrimary"
+            onClick={signIn}
+            disabled={!email || !password}
+          >
+            Sign In
+          </button>
+        )}
+
+        <button
+          className="btn"
+          onClick={() => {
+            setMsg('')
+            setMode(mode === 'signup' ? 'signin' : 'signup')
+          }}
+        >
+          {mode === 'signup' ? 'Have an account?' : 'Create account'}
+        </button>
       </div>
+
       {msg && <p style={{ marginTop: 12 }}>{msg}</p>}
     </div>
   )
@@ -90,16 +150,20 @@ function Auth() {
 
 function Dashboard({ user }) {
   const [isAdmin, setIsAdmin] = useState(false)
+  const [name, setName] = useState('')
 
   useEffect(() => {
     ;(async () => {
-      const { data: prof } = await supabase
+      const { data } = await supabase
         .from('profiles')
-        .select('is_admin')
+        .select('display_name, is_admin')
         .eq('user_id', user.id)
         .maybeSingle()
 
-      setIsAdmin(!!prof?.is_admin)
+      if (data) {
+        setIsAdmin(!!data.is_admin)
+        setName(data.display_name || '')
+      }
     })()
   }, [user.id])
 
@@ -113,14 +177,16 @@ function Dashboard({ user }) {
     border: '1px solid rgba(255,255,255,.12)',
     textAlign: 'center',
     textDecoration: 'none',
-    display: 'block',
     fontWeight: 800
   }
 
   return (
     <div className="card" style={{ marginTop: 16, maxWidth: 760 }}>
-      <p style={{ marginTop: 0, fontWeight: 800 }}>Welcome ⚽</p>
-      <p style={{ fontSize: 12, opacity: 0.75, marginTop: 0 }}>
+      <p style={{ fontWeight: 900, marginTop: 0 }}>
+        Welcome{ name ? `, ${name}` : '' } ⚽
+      </p>
+
+      <p style={{ fontSize: 12, opacity: 0.7 }}>
         {user.email}
       </p>
 
@@ -130,9 +196,8 @@ function Dashboard({ user }) {
         <a href="/leaderboard" style={linkStyle}>🏆 Leaderboard</a>
         <a href="/profile" style={linkStyle}>👤 My Profile</a>
 
-        {/* Only show to admins */}
         {isAdmin && (
-          <a href="/admin" style={linkStyle}>🛠 Admin: Enter Scores</a>
+          <a href="/admin" style={linkStyle}>🛠 Admin</a>
         )}
       </div>
 
