@@ -1,277 +1,94 @@
 'use client'
 export const dynamic = 'force-dynamic'
 
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { supabase } from '../../lib/supabaseClient'
 
-/* ---------- WINNER PREVIEW ---------- */
-function winnerPreview(homeName, awayName, homeStr, awayStr) {
-  if (homeStr === '' || awayStr === '') return null
-  const h = Number(homeStr)
-  const a = Number(awayStr)
-  if (Number.isNaN(h) || Number.isNaN(a)) return null
-  if (h > a) return { label: `Winner (preview): ${homeName}`, kind: 'home' }
-  if (a > h) return { label: `Winner (preview): ${awayName}`, kind: 'away' }
-  return { label: 'Winner (preview): Draw', kind: 'draw' }
-}
-
-export default function AdminPage() {
-  const [user, setUser] = useState(null)
+export default function AdminHubPage() {
+  const [loading, setLoading] = useState(true)
   const [isAdmin, setIsAdmin] = useState(false)
-  const [matches, setMatches] = useState([])
-  const [draftScores, setDraftScores] = useState({})
-  const [msg, setMsg] = useState('Loading...')
+  const [msg, setMsg] = useState('')
 
   useEffect(() => {
     ;(async () => {
-      const { data } = await supabase.auth.getUser()
-      const u = data?.user ?? null
-      setUser(u)
+      setLoading(true)
+      setMsg('')
+
+      const { data: auth } = await supabase.auth.getUser()
+      const u = auth?.user ?? null
 
       if (!u) {
-        setMsg('Please sign in first.')
+        setMsg('Not found.')
+        setLoading(false)
         return
       }
 
-      const { data: adminRow } = await supabase
+      const { data: prof, error } = await supabase
         .from('profiles')
         .select('is_admin')
         .eq('user_id', u.id)
         .maybeSingle()
 
-      if (!adminRow?.is_admin) {
-        setMsg('Not authorized (admin only).')
+      if (error || !prof?.is_admin) {
+        setMsg('Not found.')
+        setIsAdmin(false)
+        setLoading(false)
         return
       }
 
       setIsAdmin(true)
-      await loadMatches()
-      setMsg('')
+      setLoading(false)
     })()
   }, [])
 
-  async function loadMatches() {
-    const { data, error } = await supabase
-      .from('matches')
-      .select(`
-        id,
-        group_id,
-        home_score,
-        away_score,
-        is_final,
-        home:home_team_id ( name ),
-        away:away_team_id ( name )
-      `)
-      .order('group_id', { ascending: true })
-
-    if (error) {
-      setMsg(error.message)
-      return
-    }
-
-    const rows = data ?? []
-    setMatches(rows)
-
-    const initial = {}
-    for (const m of rows) {
-      initial[m.id] = {
-        home: m.home_score ?? '',
-        away: m.away_score ?? ''
-      }
-    }
-    setDraftScores(initial)
-  }
-
-  function setDraft(matchId, side, value) {
-    if (value !== '' && !/^\d+$/.test(value)) return
-    setDraftScores(prev => ({
-      ...prev,
-      [matchId]: { ...(prev[matchId] ?? {}), [side]: value }
-    }))
-  }
-
-  const grouped = useMemo(() => {
-    const map = {}
-    for (const m of matches) {
-      const key = m.group_id ?? '-'
-      if (!map[key]) map[key] = []
-      map[key].push(m)
-    }
-    return map
-  }, [matches])
-
-  async function saveMatch(matchId) {
-    setMsg('Saving...')
-    const d = draftScores[matchId]
-    const homeVal = d.home === '' ? null : Number(d.home)
-    const awayVal = d.away === '' ? null : Number(d.away)
-
-    const { error } = await supabase
-      .from('matches')
-      .update({ home_score: homeVal, away_score: awayVal })
-      .eq('id', matchId)
-
-    if (error) {
-      setMsg(error.message)
-      return
-    }
-
-    setMatches(prev =>
-      prev.map(m =>
-        m.id === matchId ? { ...m, home_score: homeVal, away_score: awayVal } : m
-      )
+  if (loading) {
+    return (
+      <div className="container">
+        <div className="card"><p>Loading…</p></div>
+      </div>
     )
-
-    setMsg('Saved ✅')
   }
 
-  async function finalizeMatch(matchId) {
-    await saveMatch(matchId)
-    const { error } = await supabase
-      .from('matches')
-      .update({ is_final: true })
-      .eq('id', matchId)
-
-    if (!error) {
-      setMatches(prev =>
-        prev.map(m => (m.id === matchId ? { ...m, is_final: true } : m))
-      )
-      setMsg('Finalized ✅')
-    }
-  }
-
-  async function unfinalizeMatch(matchId) {
-    const { error } = await supabase
-      .from('matches')
-      .update({ is_final: false })
-      .eq('id', matchId)
-
-    if (!error) {
-      setMatches(prev =>
-        prev.map(m => (m.id === matchId ? { ...m, is_final: false } : m))
-      )
-      setMsg('Unfinalized')
-    }
-  }
-
-  if (!user || !isAdmin) {
+  if (!isAdmin) {
     return (
       <div className="container">
         <div className="card">
-          <h1>Admin</h1>
-          <p>{msg}</p>
-          <a className="pill" href="/">← Back</a>
+          <p style={{ margin: 0 }}>{msg || 'Not found.'}</p>
+          <div className="nav" style={{ marginTop: 12 }}>
+            <a className="pill" href="/">🏠 Main Menu</a>
+          </div>
         </div>
       </div>
     )
+  }
+
+  const linkStyle = {
+    padding: 12,
+    borderRadius: 14,
+    border: '1px solid rgba(255,255,255,.12)',
+    textAlign: 'center',
+    textDecoration: 'none',
+    fontWeight: 900,
+    display: 'block'
   }
 
   return (
     <div className="container">
       <div className="nav">
-        <a className="pill" href="/">🏠 Home</a>
-        <a className="pill" href="/standings">📊 Standings</a>
+        <a className="pill" href="/">🏠 Main Menu</a>
         <a className="pill" href="/leaderboard">🏆 Leaderboard</a>
-        <button className="pill" onClick={loadMatches}>🔄 Refresh</button>
+        <a className="pill" href="/standings">📊 Standings</a>
       </div>
 
-      <h1 className="h1">Admin — Enter Match Results</h1>
-      <p className="sub">
-        Save stores scores. Finalize locks and updates standings.
-      </p>
+      <h1 className="h1" style={{ marginTop: 16 }}>Admin</h1>
+      <p className="sub">Choose what you want to manage.</p>
 
-      {msg && <div className="badge">{msg}</div>}
-
-      {Object.keys(grouped).sort().map(groupId => (
-        <div key={groupId} className="card" style={{ marginTop: 18 }}>
-          <h2 className="cardTitle">
-            {groupId === '-' ? 'No Group' : `Group ${groupId}`}
-          </h2>
-
-          {grouped[groupId].map(m => {
-            const draft = draftScores[m.id] ?? { home: '', away: '' }
-            const preview = winnerPreview(
-              m.home?.name,
-              m.away?.name,
-              draft.home,
-              draft.away
-            )
-
-            return (
-              <div
-                key={m.id}
-                style={{
-                  marginTop: 12,
-                  padding: 14,
-                  borderRadius: 14,
-                  background: 'rgba(255,255,255,.05)'
-                }}
-              >
-                <div style={{ fontWeight: 800 }}>
-                  {m.home?.name} vs {m.away?.name}
-                  {m.is_final && ' ✅ Final'}
-                </div>
-
-                <div style={{ display: 'flex', gap: 10, marginTop: 10 }}>
-                  <input
-                    className="field"
-                    placeholder="Home"
-                    disabled={m.is_final}
-                    value={draft.home}
-                    onChange={e => setDraft(m.id, 'home', e.target.value)}
-                  />
-                  <input
-                    className="field"
-                    placeholder="Away"
-                    disabled={m.is_final}
-                    value={draft.away}
-                    onChange={e => setDraft(m.id, 'away', e.target.value)}
-                  />
-                </div>
-
-                {preview && (
-                  <div
-                    style={{
-                      marginTop: 10,
-                      padding: '8px 10px',
-                      borderRadius: 10,
-                      fontWeight: 800,
-                      background:
-                        preview.kind === 'draw'
-                          ? 'rgba(255,255,255,.06)'
-                          : 'rgba(34,197,94,.15)',
-                      border:
-                        preview.kind === 'draw'
-                          ? '1px solid rgba(255,255,255,.15)'
-                          : '1px solid rgba(34,197,94,.4)'
-                    }}
-                  >
-                    {preview.label}
-                  </div>
-                )}
-
-                <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
-                  {!m.is_final && (
-                    <>
-                      <button className="btn" onClick={() => saveMatch(m.id)}>
-                        Save
-                      </button>
-                      <button className="btn btnPrimary" onClick={() => finalizeMatch(m.id)}>
-                        Finalize
-                      </button>
-                    </>
-                  )}
-                  {m.is_final && (
-                    <button className="btn" onClick={() => unfinalizeMatch(m.id)}>
-                      Unfinalize
-                    </button>
-                  )}
-                </div>
-              </div>
-            )
-          })}
+      <div className="card" style={{ marginTop: 14, maxWidth: 640 }}>
+        <div style={{ display: 'grid', gap: 12 }}>
+          <a href="/admin/groups" style={linkStyle}>📊 Group Stage Admin (Enter Scores)</a>
+          <a href="/admin/knockout" style={linkStyle}>🏟 Knockout Admin (Set Matchups)</a>
         </div>
-      ))}
+      </div>
     </div>
   )
 }
