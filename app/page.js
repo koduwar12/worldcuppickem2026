@@ -195,6 +195,7 @@ function Dashboard({ user }) {
         <a href="/standings" style={linkStyle}>📊 Standings</a>
         <a href="/leaderboard" style={linkStyle}>🏆 Leaderboard</a>
         <a href="/profile" style={linkStyle}>👤 My Profile</a>
+        <a href="/knockout" style={linkStyle}>🏟 Knockout Picks</a>
 
         {isAdmin && (
           <a href="/admin" style={linkStyle}>🛠 Admin</a>
