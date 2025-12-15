@@ -1,48 +1,39 @@
 'use client'
-export const dynamic = 'force-dynamic'
 
 import { useEffect, useMemo, useState } from 'react'
 import { supabase } from '../../lib/supabaseClient'
 
 export default function StandingsPage() {
   const [loading, setLoading] = useState(true)
+  const [msg, setMsg] = useState('')
   const [groups, setGroups] = useState([])
   const [teams, setTeams] = useState([])
   const [matches, setMatches] = useState([])
-  const [msg, setMsg] = useState('')
 
   useEffect(() => {
     ;(async () => {
       setLoading(true)
       setMsg('')
 
-      const { data: userData } = await supabase.auth.getUser()
-      if (!userData?.user) {
+      const { data: auth } = await supabase.auth.getUser()
+      if (!auth?.user) {
         setMsg('Please sign in first.')
         setLoading(false)
         return
       }
 
+      // Load groups + teams + finalized matches
       const [gRes, tRes, mRes] = await Promise.all([
-        supabase.from('groups').select('*').order('id'),
-        supabase.from('teams').select('*').order('name'),
+        supabase.from('groups').select('id,name').order('name'),
+        supabase.from('teams').select('id,name,group_id').order('name'),
         supabase
           .from('matches')
-          .select(`
-            id,
-            group_id,
-            home_score,
-            away_score,
-            is_final,
-            home:home_team_id ( id, name, group_id ),
-            away:away_team_id ( id, name, group_id )
-          `)
-          .eq('stage', 'GROUP')
+          .select('id, group_id, home_team_id, away_team_id, home_score, away_score, is_final')
           .eq('is_final', true)
       ])
 
       if (gRes.error || tRes.error || mRes.error) {
-        setMsg(gRes.error?.message || tRes.error?.message || mRes.error?.message || 'Error loading data')
+        setMsg(gRes.error?.message || tRes.error?.message || mRes.error?.message || 'Error loading')
         setLoading(false)
         return
       }
@@ -54,157 +45,230 @@ export default function StandingsPage() {
     })()
   }, [])
 
-  const standingsByGroup = useMemo(() => {
-    // Build per-team table from finalized matches only
-    const table = {} // { groupId: { teamId: stats } }
+  const teamById = useMemo(() => {
+    const map = {}
+    for (const t of teams) map[t.id] = t
+    return map
+  }, [teams])
 
-    for (const g of groups) table[g.id] = {}
+  const standingsByGroup = useMemo(() => {
+    // Initialize stats for each team
+    const stats = {} // teamId -> { P,W,D,L,GF,GA,GD,PTS }
     for (const t of teams) {
-      if (!table[t.group_id]) table[t.group_id] = {}
-      table[t.group_id][t.id] = {
-        teamId: t.id,
-        name: t.name,
-        played: 0,
-        wins: 0,
-        draws: 0,
-        losses: 0,
-        gf: 0,
-        ga: 0,
-        gd: 0,
-        pts: 0
-      }
+      stats[t.id] = { P: 0, W: 0, D: 0, L: 0, GF: 0, GA: 0, GD: 0, PTS: 0 }
     }
 
+    // Apply finalized match results
     for (const m of matches) {
-      const groupId = m.group_id
-      if (!groupId) continue
-      const hs = m.home_score
-      const as = m.away_score
-      if (hs === null || as === null) continue
+      const homeId = m.home_team_id
+      const awayId = m.away_team_id
+      if (!homeId || !awayId) continue
+      if (m.home_score === null || m.away_score === null) continue
 
-      const home = m.home
-      const away = m.away
-      if (!home?.id || !away?.id) continue
+      const hs = Number(m.home_score)
+      const as = Number(m.away_score)
 
-      const h = table[groupId]?.[home.id]
-      const a = table[groupId]?.[away.id]
-      if (!h || !a) continue
+      const home = stats[homeId]
+      const away = stats[awayId]
+      if (!home || !away) continue
 
-      h.played += 1
-      a.played += 1
+      home.P += 1
+      away.P += 1
 
-      h.gf += hs
-      h.ga += as
-      a.gf += as
-      a.ga += hs
+      home.GF += hs
+      home.GA += as
+      away.GF += as
+      away.GA += hs
 
       if (hs > as) {
-        h.wins += 1
-        a.losses += 1
-        h.pts += 3
+        home.W += 1
+        home.PTS += 3
+        away.L += 1
       } else if (hs < as) {
-        a.wins += 1
-        h.losses += 1
-        a.pts += 3
+        away.W += 1
+        away.PTS += 3
+        home.L += 1
       } else {
-        h.draws += 1
-        a.draws += 1
-        h.pts += 1
-        a.pts += 1
+        home.D += 1
+        away.D += 1
+        home.PTS += 1
+        away.PTS += 1
       }
     }
 
-    // compute gd and sort
-    const result = {}
-    for (const g of groups) {
-      const rows = Object.values(table[g.id] ?? {}).map(r => ({
-        ...r,
-        gd: r.gf - r.ga
-      }))
-
-      // Sort: points desc, gd desc, gf desc, name asc (simple tie-breaker for test set)
-      rows.sort((x, y) => {
-        if (y.pts !== x.pts) return y.pts - x.pts
-        if (y.gd !== x.gd) return y.gd - x.gd
-        if (y.gf !== x.gf) return y.gf - x.gf
-        return x.name.localeCompare(y.name)
-      })
-
-      result[g.id] = rows
+    // compute GD
+    for (const id in stats) {
+      stats[id].GD = stats[id].GF - stats[id].GA
     }
 
-    return result
+    // Group teams by group_id
+    const grouped = {}
+    for (const g of groups) grouped[g.id] = []
+    for (const t of teams) {
+      if (!grouped[t.group_id]) grouped[t.group_id] = []
+      grouped[t.group_id].push({
+        id: t.id,
+        name: t.name,
+        ...stats[t.id]
+      })
+    }
+
+    // Sort by PTS, GD, GF (classic)
+    for (const gid in grouped) {
+      grouped[gid].sort((a, b) => {
+        if (b.PTS !== a.PTS) return b.PTS - a.PTS
+        if (b.GD !== a.GD) return b.GD - a.GD
+        if (b.GF !== a.GF) return b.GF - a.GF
+        return a.name.localeCompare(b.name)
+      })
+    }
+
+    return grouped
   }, [groups, teams, matches])
 
   if (loading) {
     return (
-      <main style={{ padding: 24 }}>
-        <h1>Standings</h1>
-        <p>Loading...</p>
-      </main>
-    )
-  }
-
-  if (msg) {
-    return (
-      <main style={{ padding: 24 }}>
-        <h1>Standings</h1>
-        <p>{msg}</p>
-      </main>
+      <div className="container">
+        <div className="card">
+          <p style={{ margin: 0, color: 'rgba(234,240,255,.75)' }}>Loading…</p>
+        </div>
+      </div>
     )
   }
 
   return (
-    <main style={{ padding: 24 }}>
-      <h1>Standings (Live from Finalized Matches)</h1>
-      <p style={{ opacity: 0.7, fontSize: 12 }}>
-        Tie-break (test set): Points → Goal Diff → Goals For → Name
+    <div className="container">
+      {/* ---------- TOP NAV ---------- */}
+      <div className="nav">
+        <a className="pill" href="/">🏠 Main Menu</a>
+        <a className="pill" href="/picks">👉 Group Picks</a>
+        <a className="pill" href="/leaderboard">🏆 Leaderboard</a>
+      </div>
+
+      <h1 className="h1" style={{ marginTop: 14 }}>Standings</h1>
+      <p className="sub">
+        Updates only when matches are finalized by admin.
       </p>
 
-      {groups.map(g => (
-        <section key={g.id} style={{ marginTop: 18, padding: 14, border: '1px solid #ddd' }}>
-          <h2>{g.name}</h2>
+      {msg && <p style={{ marginTop: 10 }}>{msg}</p>}
 
-          <table style={{ width: '100%', maxWidth: 720, borderCollapse: 'collapse' }}>
-            <thead>
-              <tr>
-                <th align="left">Team</th>
-                <th>P</th>
-                <th>W</th>
-                <th>D</th>
-                <th>L</th>
-                <th>GF</th>
-                <th>GA</th>
-                <th>GD</th>
-                <th>Pts</th>
-              </tr>
-            </thead>
-            <tbody>
-              {(standingsByGroup[g.id] ?? []).map((r, idx) => (
-                <tr key={r.teamId} style={{ borderTop: '1px solid #eee' }}>
-                  <td style={{ padding: '6px 0' }}>
-                    <strong>{idx + 1}.</strong> {r.name}
-                  </td>
-                  <td align="center">{r.played}</td>
-                  <td align="center">{r.wins}</td>
-                  <td align="center">{r.draws}</td>
-                  <td align="center">{r.losses}</td>
-                  <td align="center">{r.gf}</td>
-                  <td align="center">{r.ga}</td>
-                  <td align="center">{r.gd}</td>
-                  <td align="center"><strong>{r.pts}</strong></td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+      {groups.map(g => {
+        const rows = standingsByGroup[g.id] ?? []
 
-          {(matches.filter(m => m.group_id === g.id).length === 0) && (
-            <p style={{ marginTop: 10, opacity: 0.7 }}>
-              No finalized matches yet for this group.
-            </p>
-          )}
-        </section>
-      ))}
-    </main>
+        return (
+          <div key={g.id} className="card" style={{ marginTop: 18 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap' }}>
+              <div>
+                <h2 className="cardTitle" style={{ marginBottom: 0 }}>{g.name}</h2>
+                <p className="cardSub" style={{ marginTop: 6 }}>
+                  Sorted by Points, Goal Difference, Goals For
+                </p>
+              </div>
+
+              <span className="badge">
+                ✅ Final games counted: {matches.filter(m => m.group_id === g.id).length}
+              </span>
+            </div>
+
+            <div style={{ overflowX: 'auto', marginTop: 10 }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 640 }}>
+                <thead>
+                  <tr style={{ color: 'rgba(234,240,255,.8)', fontSize: 12 }}>
+                    <th style={thStyle}>#</th>
+                    <th style={thStyleLeft}>Team</th>
+                    <th style={thStyle}>P</th>
+                    <th style={thStyle}>W</th>
+                    <th style={thStyle}>D</th>
+                    <th style={thStyle}>L</th>
+                    <th style={thStyle}>GF</th>
+                    <th style={thStyle}>GA</th>
+                    <th style={thStyle}>GD</th>
+                    <th style={thStyle}>PTS</th>
+                  </tr>
+                </thead>
+
+                <tbody>
+                  {rows.map((r, idx) => {
+                    const pos = idx + 1
+                    const posTag =
+                      pos === 1 ? '🥇' :
+                      pos === 2 ? '🥈' :
+                      pos === 3 ? '🥉' : '•'
+
+                    // subtle highlight for top 2
+                    const bg =
+                      pos <= 2 ? 'rgba(34,197,94,.10)' :
+                      'transparent'
+
+                    return (
+                      <tr key={r.id} style={{ borderTop: '1px solid rgba(255,255,255,.10)', background: bg }}>
+                        <td style={tdCenter}>
+                          <span style={{ opacity: 0.9 }}>{posTag}</span> {pos}
+                        </td>
+                        <td style={tdLeft}>
+                          <span style={{ fontWeight: 750 }}>{r.name}</span>
+                        </td>
+                        <td style={tdCenter}>{r.P}</td>
+                        <td style={tdCenter}>{r.W}</td>
+                        <td style={tdCenter}>{r.D}</td>
+                        <td style={tdCenter}>{r.L}</td>
+                        <td style={tdCenter}>{r.GF}</td>
+                        <td style={tdCenter}>{r.GA}</td>
+                        <td style={tdCenter}>
+                          <span style={{ color: r.GD > 0 ? 'rgba(34,197,94,.95)' : r.GD < 0 ? 'rgba(239,68,68,.95)' : 'rgba(234,240,255,.75)' }}>
+                            {r.GD}
+                          </span>
+                        </td>
+                        <td style={tdCenter}>
+                          <span style={{
+                            display: 'inline-flex',
+                            padding: '4px 10px',
+                            borderRadius: 999,
+                            background: 'rgba(124,58,237,.18)',
+                            border: '1px solid rgba(124,58,237,.28)',
+                            fontWeight: 800
+                          }}>
+                            {r.PTS}
+                          </span>
+                        </td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )
+      })}
+
+      <div className="footerNote">
+        Note: FIFA tie-breakers can get more complex (head-to-head, fair play). We’re using the common PTS → GD → GF sort for now.
+      </div>
+    </div>
   )
+}
+
+/* ---------- tiny table styles ---------- */
+
+const thStyle = {
+  textAlign: 'center',
+  padding: '10px 8px',
+  borderBottom: '1px solid rgba(255,255,255,.14)'
+}
+
+const thStyleLeft = {
+  ...thStyle,
+  textAlign: 'left'
+}
+
+const tdCenter = {
+  textAlign: 'center',
+  padding: '10px 8px',
+  color: 'rgba(234,240,255,.9)',
+  fontSize: 13
+}
+
+const tdLeft = {
+  ...tdCenter,
+  textAlign: 'left'
 }
