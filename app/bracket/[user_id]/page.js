@@ -28,7 +28,6 @@ export default function ViewBracketPage() {
     setLoading(true)
     setMsg('')
 
-    // groups + teams
     const { data: groupData, error: gErr } = await supabase
       .from('groups')
       .select('id, name, teams(id, name)')
@@ -40,7 +39,6 @@ export default function ViewBracketPage() {
       return
     }
 
-    // submitted picks (read-only)
     const { data: pickData, error: pErr } = await supabase
       .from('group_picks')
       .select('group_id, team_id, position, submitted_at')
@@ -53,32 +51,28 @@ export default function ViewBracketPage() {
       return
     }
 
-    // score per pick (may be empty if no match results yet)
     const { data: scoreData, error: sErr } = await supabase
       .from('group_pick_scores')
       .select('group_id, team_id, picked_position, actual_position, points_awarded, exact, qualified_wrong_order')
       .eq('user_id', uid)
 
     if (sErr) {
-      // Not fatal; bracket can still show. Just show a helpful message.
-      setMsg(`Scoring not available yet: ${sErr.message}`)
+      setMsg(`Scoring not available yet.`)
     }
 
-    // profile name
     const { data: prof } = await supabase
       .from('profiles')
       .select('display_name')
       .eq('user_id', uid)
       .maybeSingle()
 
-    // maps
     const pickMap = {}
-    ;(pickData || []).forEach(p => {
+    pickData?.forEach(p => {
       pickMap[`${p.group_id}-${p.position}`] = p.team_id
     })
 
     const sMap = {}
-    ;(scoreData || []).forEach(s => {
+    scoreData?.forEach(s => {
       sMap[`${s.group_id}-${s.picked_position}`] = s
     })
 
@@ -101,10 +95,10 @@ export default function ViewBracketPage() {
     return (
       <div className="container">
         <div className="card">
-          <p style={{ marginTop: 0 }}>Invalid bracket link.</p>
-          <div className="nav" style={{ marginTop: 10 }}>
-            <a className="pill" href="/leaderboard">🏆 Back to Leaderboard</a>
+          <p>Invalid bracket link.</p>
+          <div className="nav">
             <a className="pill" href="/">🏠 Main Menu</a>
+            <a className="pill" href="/leaderboard">🏆 Leaderboard</a>
           </div>
         </div>
       </div>
@@ -126,56 +120,57 @@ export default function ViewBracketPage() {
         {displayName}’s Bracket
       </h1>
       <p className="sub">Group stage picks (read-only)</p>
-<div
-  className="card"
-  style={{
-    marginTop: 12,
-    padding: 14,
-    display: 'flex',
-    flexWrap: 'wrap',
-    gap: 10,
-    alignItems: 'center'
-  }}
->
-  <strong style={{ marginRight: 6 }}>Legend:</strong>
 
-  <span
-    style={{
-      padding: '6px 10px',
-      borderRadius: 999,
-      background: 'rgba(34,197,94,.22)',
-      border: '1px solid rgba(34,197,94,.45)',
-      fontWeight: 800
-    }}
-  >
-    ✅ Exact spot (+5)
-  </span>
+      {/* ---------- LEGEND ---------- */}
+      <div
+        className="card"
+        style={{
+          marginTop: 12,
+          padding: 14,
+          display: 'flex',
+          flexWrap: 'wrap',
+          gap: 10,
+          alignItems: 'center'
+        }}
+      >
+        <strong>Legend:</strong>
 
-  <span
-    style={{
-      padding: '6px 10px',
-      borderRadius: 999,
-      background: 'rgba(56,189,248,.18)',
-      border: '1px solid rgba(56,189,248,.35)',
-      fontWeight: 800
-    }}
-  >
-    🟦 Qualified wrong order (+2)
-  </span>
+        <span
+          style={{
+            padding: '6px 10px',
+            borderRadius: 999,
+            background: 'rgba(34,197,94,.22)',
+            border: '1px solid rgba(34,197,94,.45)',
+            fontWeight: 800
+          }}
+        >
+          ✅ Exact position (+5)
+        </span>
 
-  <span
-    style={{
-      padding: '6px 10px',
-      borderRadius: 999,
-      background: 'rgba(255,255,255,.06)',
-      border: '1px solid rgba(255,255,255,.12)',
-      fontWeight: 800
-    }}
-  >
-    ⬜ Not correct (+0) / Waiting for results
-  </span>
-</div>
+        <span
+          style={{
+            padding: '6px 10px',
+            borderRadius: 999,
+            background: 'rgba(56,189,248,.18)',
+            border: '1px solid rgba(56,189,248,.35)',
+            fontWeight: 800
+          }}
+        >
+          🟦 Qualified, wrong order (+2)
+        </span>
 
+        <span
+          style={{
+            padding: '6px 10px',
+            borderRadius: 999,
+            background: 'rgba(255,255,255,.06)',
+            border: '1px solid rgba(255,255,255,.12)',
+            fontWeight: 800
+          }}
+        >
+          ⬜ Incorrect / awaiting results (+0)
+        </span>
+      </div>
 
       {msg && (
         <div className="card" style={{ marginTop: 12 }}>
@@ -195,11 +190,8 @@ export default function ViewBracketPage() {
             const isExact = !!score?.exact
             const isQualWrong = !!score?.qualified_wrong_order
             const pts = score?.points_awarded ?? null
+            const actualPos = score?.actual_position ?? null
 
-            // color logic:
-            // exact = green
-            // qualified wrong order = teal
-            // wrong/unknown = default
             const bg = isExact
               ? 'rgba(34,197,94,.22)'
               : isQualWrong
@@ -222,8 +214,8 @@ export default function ViewBracketPage() {
                   background: bg,
                   border: outline,
                   display: 'flex',
-                  alignItems: 'center',
                   justifyContent: 'space-between',
+                  alignItems: 'center',
                   gap: 12
                 }}
               >
@@ -235,6 +227,21 @@ export default function ViewBracketPage() {
                 </div>
 
                 <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                  {actualPos !== null && (
+                    <span
+                      style={{
+                        fontSize: 12,
+                        fontWeight: 800,
+                        padding: '6px 10px',
+                        borderRadius: 999,
+                        background: 'rgba(0,0,0,.18)',
+                        border: '1px solid rgba(255,255,255,.10)'
+                      }}
+                    >
+                      Actual #{actualPos}
+                    </span>
+                  )}
+
                   {pts !== null && (
                     <span
                       style={{
@@ -249,8 +256,8 @@ export default function ViewBracketPage() {
                     </span>
                   )}
 
-                  {isExact && <span title="Exact position">✅</span>}
-                  {isQualWrong && <span title="Qualified (wrong order)">🟦</span>}
+                  {isExact && <span>✅</span>}
+                  {isQualWrong && <span>🟦</span>}
                 </div>
               </div>
             )
