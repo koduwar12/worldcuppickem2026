@@ -2,11 +2,9 @@
 
 import { useEffect, useState } from 'react'
 import { supabase } from '../../../lib/supabaseClient'
-import { useParams } from 'next/navigation'
 
-export default function ViewBracketPage() {
-  const params = useParams()
-  const userId = params.user_id
+export default function ViewBracketPage({ params }) {
+  const userId = params?.user_id
 
   const [loading, setLoading] = useState(true)
   const [msg, setMsg] = useState('')
@@ -15,11 +13,14 @@ export default function ViewBracketPage() {
   const [profile, setProfile] = useState(null)
 
   useEffect(() => {
+    if (!userId) return
     load()
-  }, [])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [userId])
 
   async function load() {
     setLoading(true)
+    setMsg('')
 
     // Load groups + teams
     const { data: groupData, error: gErr } = await supabase
@@ -33,7 +34,7 @@ export default function ViewBracketPage() {
       return
     }
 
-    // Load that user's picks
+    // Load that user's picks (submitted only)
     const { data: pickData, error: pErr } = await supabase
       .from('group_picks')
       .select('group_id, team_id, position, submitted_at')
@@ -46,12 +47,12 @@ export default function ViewBracketPage() {
       return
     }
 
-    // Optional: load display name if you have profiles table
+    // Optional: display name from profiles
     const { data: profileData } = await supabase
       .from('profiles')
       .select('display_name')
       .eq('user_id', userId)
-      .single()
+      .maybeSingle()
 
     setGroups(groupData || [])
 
@@ -65,11 +66,25 @@ export default function ViewBracketPage() {
     setLoading(false)
   }
 
+  if (!userId) {
+    return (
+      <div className="container">
+        <div className="card">
+          <p>Invalid bracket link.</p>
+          <div className="nav" style={{ marginTop: 10 }}>
+            <a className="pill" href="/leaderboard">🏆 Back to Leaderboard</a>
+            <a className="pill" href="/">🏠 Main Menu</a>
+          </div>
+        </div>
+      </div>
+    )
+  }
+
   if (loading) {
     return (
       <div className="container">
         <div className="card">
-          <p>Loading bracket…</p>
+          <p style={{ margin: 0, color: 'rgba(234,240,255,.75)' }}>Loading bracket…</p>
         </div>
       </div>
     )
@@ -80,13 +95,17 @@ export default function ViewBracketPage() {
       <div className="container">
         <div className="card">
           <p>{msg}</p>
+          <div className="nav" style={{ marginTop: 10 }}>
+            <a className="pill" href="/leaderboard">🏆 Back to Leaderboard</a>
+            <a className="pill" href="/">🏠 Main Menu</a>
+          </div>
         </div>
       </div>
     )
   }
 
   const displayName =
-    profile?.display_name ||
+    profile?.display_name?.trim() ||
     `User ${String(userId).slice(0, 6)}`
 
   return (
@@ -101,15 +120,19 @@ export default function ViewBracketPage() {
       <h1 className="h1" style={{ marginTop: 16 }}>
         {displayName}’s Bracket
       </h1>
-      <p className="sub">
-        Group stage picks (read-only)
-      </p>
+      <p className="sub">Group stage picks (read-only)</p>
+
+      {Object.keys(picks).length === 0 && (
+        <div className="badge" style={{ marginTop: 10 }}>
+          No submitted picks found for this user yet.
+        </div>
+      )}
 
       {groups.map(group => (
         <div key={group.id} className="card" style={{ marginTop: 18 }}>
           <h2 className="cardTitle">{group.name}</h2>
 
-          {group.teams.map((team, index) => {
+          {group.teams.map((_t, index) => {
             const position = index + 1
             const pickedTeamId = picks[`${group.id}-${position}`]
             const pickedTeam = group.teams.find(t => t.id === pickedTeamId)
@@ -119,14 +142,19 @@ export default function ViewBracketPage() {
                 key={position}
                 style={{
                   padding: 10,
-                  marginTop: 6,
+                  marginTop: 8,
                   borderRadius: 12,
                   background: 'rgba(255,255,255,.06)',
-                  border: '1px solid rgba(255,255,255,.12)'
+                  border: '1px solid rgba(255,255,255,.12)',
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  gap: 10
                 }}
               >
-                <strong>#{position}</strong>{' '}
-                {pickedTeam ? pickedTeam.name : '—'}
+                <span style={{ fontWeight: 900 }}>#{position}</span>
+                <span style={{ fontWeight: 750 }}>
+                  {pickedTeam ? pickedTeam.name : '—'}
+                </span>
               </div>
             )
           })}
