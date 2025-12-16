@@ -132,7 +132,6 @@ export default function AdminKnockoutPage() {
     for (let matchNo = 1; matchNo <= count; matchNo++) {
       const cur = draft?.[round]?.[matchNo] ?? { home_team_id: '', away_team_id: '' }
 
-      // IMPORTANT: do NOT include "id" here (id is auto-generated in DB)
       rows.push({
         round,
         match_no: matchNo,
@@ -141,7 +140,6 @@ export default function AdminKnockoutPage() {
       })
     }
 
-    // IMPORTANT: requires UNIQUE(round, match_no) in DB
     const { error } = await supabase
       .from('knockout_matches')
       .upsert(rows, { onConflict: 'round,match_no' })
@@ -195,6 +193,40 @@ export default function AdminKnockoutPage() {
     return map
   }, [matches])
 
+  // ✅ Build a "used teams" set per round from current DRAFT (not DB)
+  const usedByRound = useMemo(() => {
+    const out = {}
+    for (const r of ROUND_ORDER) {
+      const set = new Set()
+      const count = ROUND_MATCH_COUNTS[r] ?? 0
+      for (let i = 1; i <= count; i++) {
+        const cur = draft?.[r]?.[i]
+        if (cur?.home_team_id) set.add(String(cur.home_team_id))
+        if (cur?.away_team_id) set.add(String(cur.away_team_id))
+      }
+      out[r] = set
+    }
+    return out
+  }, [draft])
+
+  function isDisabledOption(round, matchNo, side, teamId) {
+    const id = String(teamId)
+    const cur = draft?.[round]?.[matchNo] ?? { home_team_id: '', away_team_id: '' }
+
+    // Always allow current selection so it doesn't disappear/lock you out
+    if (String(cur?.[side] || '') === id) return false
+
+    // Block picking same team on the opposite side of SAME match
+    const otherSide = side === 'home_team_id' ? 'away_team_id' : 'home_team_id'
+    if (String(cur?.[otherSide] || '') === id) return true
+
+    // Block teams already used elsewhere in this round
+    const used = usedByRound?.[round]
+    if (!used) return false
+
+    return used.has(id)
+  }
+
   if (loading) {
     return (
       <div className="container">
@@ -226,7 +258,9 @@ export default function AdminKnockoutPage() {
       </div>
 
       <h1 className="h1" style={{ marginTop: 16 }}>Admin — Knockout Setup</h1>
-      <p className="sub">Assign teams for each knockout match. Click Save per round.</p>
+      <p className="sub">
+        Assign teams for each knockout match. Teams already used in the same round are disabled.
+      </p>
 
       {msg && <div className="badge" style={{ marginTop: 10 }}>{msg}</div>}
 
@@ -234,13 +268,16 @@ export default function AdminKnockoutPage() {
         <div key={round} className="card" style={{ marginTop: 18 }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'center' }}>
             <h2 className="cardTitle" style={{ margin: 0 }}>{ROUND_LABEL[round] || round}</h2>
-            <div style={{ display: 'flex', gap: 8 }}>
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+              <div style={{ fontSize: 12, opacity: 0.8, fontWeight: 800, paddingTop: 6 }}>
+                Used: {usedByRound?.[round]?.size ?? 0}
+              </div>
               <button className="btn" onClick={() => clearRound(round)}>Clear</button>
               <button className="btn btnPrimary" onClick={() => saveRound(round)}>Save</button>
             </div>
           </div>
 
-          <div style={{ marginTop: 12, opacity: 0.85, fontSize: 13 }}>
+          <div style={{ marginTop: 10, opacity: 0.85, fontSize: 13 }}>
             Saved matches in DB for this round: {(matchesByRound[round] ?? []).length}
           </div>
 
@@ -262,7 +299,9 @@ export default function AdminKnockoutPage() {
                   >
                     <option value="">Home team</option>
                     {teams.map(t => (
-                      <option key={t.id} value={t.id}>{t.name}</option>
+                      <option key={t.id} value={t.id} disabled={isDisabledOption(round, matchNo, 'home_team_id', t.id)}>
+                        {t.name}
+                      </option>
                     ))}
                   </select>
 
@@ -273,7 +312,9 @@ export default function AdminKnockoutPage() {
                   >
                     <option value="">Away team</option>
                     {teams.map(t => (
-                      <option key={t.id} value={t.id}>{t.name}</option>
+                      <option key={t.id} value={t.id} disabled={isDisabledOption(round, matchNo, 'away_team_id', t.id)}>
+                        {t.name}
+                      </option>
                     ))}
                   </select>
                 </div>
