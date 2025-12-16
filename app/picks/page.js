@@ -9,14 +9,12 @@ import { supabase } from '../../lib/supabaseClient'
  */
 const DEADLINE_UTC = '2026-03-11T05:00:00Z'
 
-// ✅ UUID-safe key separator (UUIDs contain "-")
+// UUID-safe key separator (UUIDs contain "-")
 const KEY_SEP = '::'
 const makeKey = (groupId, pos) => `${groupId}${KEY_SEP}${pos}`
 const parseKey = key => {
-  const parts = String(key).split(KEY_SEP)
-  const group_id = parts[0]
-  const position = Number(parts[1])
-  return { group_id, position }
+  const [group_id, posStr] = String(key).split(KEY_SEP)
+  return { group_id, position: Number(posStr) }
 }
 
 export default function PicksPage() {
@@ -71,7 +69,7 @@ export default function PicksPage() {
       return
     }
 
-    // ✅ select('*') so it works whether your table uses "position" or "rank"
+    // Select * so it works regardless of schema (rank/position)
     const { data: pickData, error: pErr } = await supabase
       .from('group_picks')
       .select('*')
@@ -89,7 +87,7 @@ export default function PicksPage() {
     let sub = null
 
     ;(pickData || []).forEach(p => {
-      const pos = p.position ?? p.rank // ✅ whichever exists in your DB
+      const pos = p.position ?? p.rank
       if (p.group_id && pos != null) {
         map[makeKey(p.group_id, pos)] = p.team_id
       }
@@ -101,42 +99,63 @@ export default function PicksPage() {
     setLoading(false)
   }
 
-  // ✅ Upsert helper that supports either schema:
-  // tries "position" first, then falls back to "rank" if needed.
-  async function upsertGroupPicks(rows, preferredCol /* 'position'|'rank' */) {
-    // Try position first by default
-    const tryCols = preferredCol === 'rank' ? ['rank', 'position'] : ['position', 'rank']
+  /**
+   * ✅ Ultra-robust upsert:
+   * 1) Try sending BOTH {rank, position}
+   * 2) If one column doesn't exist, retry with the other
+   */
+  async function upsertGroupPicks(rows) {
+    const baseRows = rows.map(r => ({
+      user_id: r.user_id,
+      group_id: r.group_id,
+      team_id: r.team_id,
+      submitted_at: r.submitted_at
+    }))
 
-    for (const col of tryCols) {
-      const payload = rows.map(r => {
-        const base = {
-          user_id: r.user_id,
-          group_id: r.group_id,
-          team_id: r.team_id,
-          submitted_at: r.submitted_at
-        }
-        if (col === 'position') return { ...base, position: r.position }
-        return { ...base, rank: r.position }
-      })
-
+    // Attempt 1: send BOTH columns (best if both exist or both are NOT NULL)
+    {
+      const payload = baseRows.map((b, i) => ({
+        ...b,
+        position: rows[i].position,
+        rank: rows[i].position
+      }))
       const { error } = await supabase.from('group_picks').upsert(payload)
+      if (!error) return { ok: true, used: 'both' }
 
-      if (!error) return { ok: true, used: col }
+      const msg = String(error.message || '').toLowerCase()
+      const posMissing = msg.includes('column') && msg.includes('position') && msg.includes('does not exist')
+      const rankMissing = msg.includes('column') && msg.includes('rank') && msg.includes('does not exist')
 
-      const msg = String(error.message || '')
-      const missingPosition = msg.toLowerCase().includes('column') && msg.toLowerCase().includes('position') && msg.toLowerCase().includes('does not exist')
-      const missingRank = msg.toLowerCase().includes('column') && msg.toLowerCase().includes('rank') && msg.toLowerCase().includes('does not exist')
-
-      // If the column literally doesn't exist, try the other one
-      if ((col === 'position' && missingPosition) || (col === 'rank' && missingRank)) {
-        continue
-      }
-
-      // Otherwise it's a real error (RLS, nulls, etc.)
-      return { ok: false, error }
+      // If neither column is missing, it's a real error (RLS, nulls, etc.)
+      // We'll still fall through to try single-col attempts ONLY if one is missing.
+      if (!posMissing && !rankMissing) return { ok: false, error }
+      // else continue to single-col attempts
     }
 
-    return { ok: false, error: { message: 'Neither "position" nor "rank" columns could be used.' } }
+    // Attempt 2: rank only
+    {
+      const payload = baseRows.map((b, i) => ({
+        ...b,
+        rank: rows[i].position
+      }))
+      const { error } = await supabase.from('group_picks').upsert(payload)
+      if (!error) return { ok: true, used: 'rank' }
+
+      const msg = String(error.message || '').toLowerCase()
+      const rankMissing = msg.includes('column') && msg.includes('rank') && msg.includes('does not exist')
+      if (!rankMissing) return { ok: false, error }
+    }
+
+    // Attempt 3: position only
+    {
+      const payload = baseRows.map((b, i) => ({
+        ...b,
+        position: rows[i].position
+      }))
+      const { error } = await supabase.from('group_picks').upsert(payload)
+      if (!error) return { ok: true, used: 'position' }
+      return { ok: false, error }
+    }
   }
 
   async function saveDraft() {
@@ -148,14 +167,12 @@ export default function PicksPage() {
 
     setMsg('Saving...')
 
-    // If they already submitted once, keep submitted_at (don’t “unsubmit”)
+    // If already submitted, keep it (don’t “unsubmit” on save)
     const keepSubmittedAt = submittedAt || null
 
     const rows = Object.entries(picks)
       .map(([key, teamId]) => {
         const { group_id, position } = parseKey(key)
-
-        // ✅ Only write complete rows
         if (!group_id) return null
         if (!Number.isFinite(position)) return null
         if (!teamId) return null
@@ -175,13 +192,13 @@ export default function PicksPage() {
       return
     }
 
-    const res = await upsertGroupPicks(rows, 'position')
+    const res = await upsertGroupPicks(rows)
     if (!res.ok) {
       setMsg(res.error?.message || 'Save failed.')
       return
     }
 
-    setMsg(`Saved ✅`)
+    setMsg('Saved ✅')
   }
 
   async function submit() {
@@ -227,7 +244,7 @@ export default function PicksPage() {
       return
     }
 
-    const res = await upsertGroupPicks(rows, 'position')
+    const res = await upsertGroupPicks(rows)
     if (!res.ok) {
       setMsg(res.error?.message || 'Submit failed.')
       return
