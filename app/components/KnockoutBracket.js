@@ -2,7 +2,6 @@
 
 import React from 'react'
 
-const ROUND_ORDER = ['R32', 'R16', 'QF', 'SF', 'F']
 const ROUND_LABEL = {
   R32: 'Round of 32',
   R16: 'Round of 16',
@@ -11,28 +10,41 @@ const ROUND_LABEL = {
   F: 'Final',
   W: 'Winner'
 }
+
 const ROUND_MATCH_COUNTS = { R32: 16, R16: 8, QF: 4, SF: 2, F: 1 }
 
-// ✅ Layout tuning (less congested)
+// ✅ Layout tuning (roomy + readable)
 const COL_WIDTH = 270
-const COL_GAP = 100
+const COL_GAP = 110
 
-const UNIT = 44            // vertical unit (bigger = more spacing)
-const TOTAL_ROWS = 32      // scaffold rows for R32
-const CARD_H = 86          // card height
+const UNIT = 44
+const TOTAL_ROWS = 32
+const CARD_H = 86
 
 const PAD = 16
-const HEADER_H = 44        // reserve space for round headers
+const HEADER_H = 44
 const HEIGHT = TOTAL_ROWS * UNIT + HEADER_H + PAD * 2
 
+// Column plan (fixes congestion):
+// 0: R32 (matches 1-8)
+// 1: R32 (matches 9-16)
+// 2: R16
+// 3: QF
+// 4: SF
+// 5: F
+// 6: Winner
+const COLS = ['R32_L', 'R32_R', 'R16', 'QF', 'SF', 'F', 'W']
+
+// Round index for vertical math (bracket progression)
+const ROUND_INDEX = { R32: 0, R16: 1, QF: 2, SF: 3, F: 4 }
+
 function buildRoundMap(matches) {
-  const map = {}
-  for (const r of ROUND_ORDER) map[r] = []
+  const map = { R32: [], R16: [], QF: [], SF: [], F: [] }
   for (const m of matches || []) {
     if (!map[m.round]) map[m.round] = []
     map[m.round].push(m)
   }
-  for (const r of ROUND_ORDER) {
+  for (const r of Object.keys(map)) {
     map[r].sort((a, b) => (a.match_no ?? 0) - (b.match_no ?? 0))
   }
   return map
@@ -40,7 +52,7 @@ function buildRoundMap(matches) {
 
 function ensureSlots(roundMap) {
   const out = {}
-  for (const r of ROUND_ORDER) {
+  for (const r of Object.keys(ROUND_MATCH_COUNTS)) {
     const count = ROUND_MATCH_COUNTS[r]
     const existing = roundMap[r] || []
     const byNo = {}
@@ -76,18 +88,17 @@ function winnerTeamId(match) {
   return hs > as ? match.home?.id || match.home_team_id : match.away?.id || match.away_team_id
 }
 
-function colX(roundIndex) {
-  return PAD + roundIndex * (COL_WIDTH + COL_GAP)
+function colX(colIndex) {
+  return PAD + colIndex * (COL_WIDTH + COL_GAP)
 }
 
 function centerRow(roundIndex, matchNo) {
-  // matchNo starts at 1, roundIndex 0=R32
+  // matchNo starts at 1
   const mult = Math.pow(2, roundIndex)
   return (2 * matchNo - 1) * mult
 }
 
 function cardCenterY(roundIndex, matchNo) {
-  // push everything down by HEADER_H
   return PAD + HEADER_H + centerRow(roundIndex, matchNo) * UNIT
 }
 
@@ -97,6 +108,13 @@ function cardY(roundIndex, matchNo) {
 
 function getTeamName(obj) {
   return obj?.name || 'TBD'
+}
+
+function getWinnerNameFromFinal(finalMatch, teamId) {
+  if (!finalMatch || !teamId) return null
+  if (finalMatch?.home?.id === teamId) return finalMatch?.home?.name || null
+  if (finalMatch?.away?.id === teamId) return finalMatch?.away?.name || null
+  return null
 }
 
 export default function KnockoutBracket({
@@ -109,34 +127,69 @@ export default function KnockoutBracket({
   showWinnerColumn = true
 }) {
   const roundMap = ensureSlots(buildRoundMap(matches))
-  const roundsToRender = showWinnerColumn ? [...ROUND_ORDER, 'W'] : [...ROUND_ORDER]
-  const totalCols = roundsToRender.length
+  const totalCols = showWinnerColumn ? COLS.length : COLS.length - 1
   const innerWidth = PAD * 2 + (totalCols - 1) * (COL_WIDTH + COL_GAP) + COL_WIDTH
 
-  // Connector lines
+  // ✅ Connector lines
   const paths = []
-  for (let rIndex = 0; rIndex < ROUND_ORDER.length - 1; rIndex++) {
-    const fromRound = ROUND_ORDER[rIndex]
-    const x1 = colX(rIndex) + COL_WIDTH
-    const x2 = colX(rIndex + 1)
-    const midX = x1 + COL_GAP / 2
 
-    const fromMatches = roundMap[fromRound] || []
+  // R32 -> R16 (split)
+  // Left column has match_no 1..8 feeding R16 match 1..4
+  // Right column has match_no 9..16 feeding R16 match 5..8
+  const r32 = roundMap.R32 || []
+  for (const m of r32) {
+    const n = m.match_no || 1
+
+    const fromCol = n <= 8 ? 0 : 1
+    const toCol = 2 // R16 column
+
+    const x1 = colX(fromCol) + COL_WIDTH
+    const x2 = colX(toCol)
+    const midX = (x1 + x2) / 2
+
+    const y1 = cardCenterY(ROUND_INDEX.R32, n)
+
+    let r16No
+    if (n <= 8) {
+      r16No = Math.ceil(n / 2) // 1..4
+    } else {
+      r16No = 4 + Math.ceil((n - 8) / 2) // 5..8
+    }
+    const y2 = cardCenterY(ROUND_INDEX.R16, r16No)
+
+    paths.push(`M ${x1} ${y1} H ${midX} V ${y2} H ${x2}`)
+  }
+
+  // R16 -> QF -> SF -> F (normal)
+  const chain = [
+    { from: 'R16', to: 'QF', fromCol: 2, toCol: 3, fromIdx: ROUND_INDEX.R16, toIdx: ROUND_INDEX.QF },
+    { from: 'QF', to: 'SF', fromCol: 3, toCol: 4, fromIdx: ROUND_INDEX.QF, toIdx: ROUND_INDEX.SF },
+    { from: 'SF', to: 'F', fromCol: 4, toCol: 5, fromIdx: ROUND_INDEX.SF, toIdx: ROUND_INDEX.F }
+  ]
+
+  for (const step of chain) {
+    const fromMatches = roundMap[step.from] || []
     for (const m of fromMatches) {
       const fromNo = m.match_no || 1
       const toNo = Math.ceil(fromNo / 2)
-      const y1 = cardCenterY(rIndex, fromNo)
-      const y2 = cardCenterY(rIndex + 1, toNo)
+
+      const x1 = colX(step.fromCol) + COL_WIDTH
+      const x2 = colX(step.toCol)
+      const midX = (x1 + x2) / 2
+
+      const y1 = cardCenterY(step.fromIdx, fromNo)
+      const y2 = cardCenterY(step.toIdx, toNo)
+
       paths.push(`M ${x1} ${y1} H ${midX} V ${y2} H ${x2}`)
     }
   }
 
   // Final -> Winner connector
   if (showWinnerColumn) {
-    const finalX1 = colX(ROUND_ORDER.length - 1) + COL_WIDTH
-    const winX2 = colX(ROUND_ORDER.length)
-    const y = cardCenterY(ROUND_ORDER.length - 1, 1)
-    const midX = finalX1 + COL_GAP / 2
+    const finalX1 = colX(5) + COL_WIDTH
+    const winX2 = colX(6)
+    const y = cardCenterY(ROUND_INDEX.F, 1)
+    const midX = (finalX1 + winX2) / 2
     paths.push(`M ${finalX1} ${y} H ${midX} H ${winX2}`)
   }
 
@@ -146,27 +199,17 @@ export default function KnockoutBracket({
   const pickedWinnerId = finalMatch?.id && selections ? selections[finalMatch.id] : null
 
   const winnerName =
-    (actualWinnerId &&
-      (finalMatch?.home?.id === actualWinnerId
-        ? finalMatch?.home?.name
-        : finalMatch?.away?.id === actualWinnerId
-        ? finalMatch?.away?.name
-        : null)) ||
-    (!actualWinnerId && pickedWinnerId
-      ? (finalMatch?.home?.id === pickedWinnerId
-          ? finalMatch?.home?.name
-          : finalMatch?.away?.id === pickedWinnerId
-          ? finalMatch?.away?.name
-          : null)
-      : null) ||
+    getWinnerNameFromFinal(finalMatch, actualWinnerId) ||
+    getWinnerNameFromFinal(finalMatch, pickedWinnerId) ||
     'TBD'
 
-  function renderMatchCard(roundKey, roundIndex, matchObj) {
+  function renderMatchCard(colIndex, roundKey, roundIndex, matchObj) {
     const matchId = matchObj?.id
     const matchNo = matchObj?.match_no || 1
     const home = matchObj?.home
     const away = matchObj?.away
-    const canPick = !!home?.id && !!away?.id && typeof matchId !== 'string'
+    const isPlaceholder = typeof matchId === 'string'
+    const canPick = !!home?.id && !!away?.id && !isPlaceholder
 
     const pick = matchId && selections ? selections[matchId] : null
     const actual = winnerTeamId(matchObj)
@@ -188,10 +231,10 @@ export default function KnockoutBracket({
 
     return (
       <div
-        key={`${roundKey}-${matchNo}`}
+        key={`${roundKey}-${matchNo}-${colIndex}`}
         style={{
           position: 'absolute',
-          left: colX(roundIndex),
+          left: colX(colIndex),
           top: cardY(roundIndex, matchNo),
           width: COL_WIDTH,
           height: CARD_H,
@@ -272,7 +315,6 @@ export default function KnockoutBracket({
         </div>
       </div>
 
-      {/* ✅ Let it scroll vertically too (brackets are tall) */}
       <div
         style={{
           marginTop: 12,
@@ -282,26 +324,50 @@ export default function KnockoutBracket({
           borderRadius: 16,
           border: '1px solid rgba(255,255,255,.10)',
           background: 'rgba(0,0,0,.12)',
-          maxHeight: '70vh' // key: prevents “everything squished”
+          maxHeight: '70vh'
         }}
       >
         <div style={{ position: 'relative', width: innerWidth, height: HEIGHT }}>
-          {/* Round headers */}
-          {roundsToRender.map((r, idx) => (
-            <div
-              key={`hdr-${r}`}
-              style={{
-                position: 'absolute',
-                left: colX(idx),
-                top: PAD,
-                width: COL_WIDTH,
-                fontWeight: 900,
-                opacity: 0.9
-              }}
-            >
-              {ROUND_LABEL[r] || r}
-            </div>
-          ))}
+          {/* ✅ Headers */}
+          {/* Round of 32 header spans BOTH R32 columns */}
+          <div
+            style={{
+              position: 'absolute',
+              left: colX(0),
+              top: PAD,
+              width: COL_WIDTH * 2 + COL_GAP,
+              fontWeight: 900,
+              opacity: 0.9
+            }}
+          >
+            {ROUND_LABEL.R32}
+          </div>
+
+          {/* Other round headers */}
+          {['R16', 'QF', 'SF', 'F', ...(showWinnerColumn ? ['W'] : [])].map(r => {
+            const colIndex =
+              r === 'R16' ? 2 :
+              r === 'QF' ? 3 :
+              r === 'SF' ? 4 :
+              r === 'F' ? 5 :
+              6
+
+            return (
+              <div
+                key={`hdr-${r}`}
+                style={{
+                  position: 'absolute',
+                  left: colX(colIndex),
+                  top: PAD,
+                  width: COL_WIDTH,
+                  fontWeight: 900,
+                  opacity: 0.9
+                }}
+              >
+                {ROUND_LABEL[r] || r}
+              </div>
+            )
+          })}
 
           {/* Connector lines */}
           <svg
@@ -320,19 +386,26 @@ export default function KnockoutBracket({
             ))}
           </svg>
 
-          {/* Match cards */}
-          {ROUND_ORDER.map((r, rIndex) => {
-            const list = roundMap[r] || []
-            return list.map(m => renderMatchCard(r, rIndex, m))
+          {/* ✅ R32 cards split across two columns */}
+          {(roundMap.R32 || []).map(m => {
+            const n = m.match_no || 1
+            const colIndex = n <= 8 ? 0 : 1
+            return renderMatchCard(colIndex, 'R32', ROUND_INDEX.R32, m)
           })}
+
+          {/* Other rounds */}
+          {(roundMap.R16 || []).map(m => renderMatchCard(2, 'R16', ROUND_INDEX.R16, m))}
+          {(roundMap.QF || []).map(m => renderMatchCard(3, 'QF', ROUND_INDEX.QF, m))}
+          {(roundMap.SF || []).map(m => renderMatchCard(4, 'SF', ROUND_INDEX.SF, m))}
+          {(roundMap.F || []).map(m => renderMatchCard(5, 'F', ROUND_INDEX.F, m))}
 
           {/* Winner column */}
           {showWinnerColumn && (
             <div
               style={{
                 position: 'absolute',
-                left: colX(ROUND_ORDER.length),
-                top: cardY(ROUND_ORDER.length - 1, 1),
+                left: colX(6),
+                top: cardY(ROUND_INDEX.F, 1),
                 width: COL_WIDTH,
                 height: CARD_H,
                 padding: 12,
