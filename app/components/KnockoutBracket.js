@@ -13,7 +13,7 @@ const ROUND_LABEL = {
 
 const ROUND_MATCH_COUNTS = { R32: 16, R16: 8, QF: 4, SF: 2, F: 1 }
 
-// ✅ Layout tuning (roomy + readable)
+// Layout tuning
 const COL_WIDTH = 270
 const COL_GAP = 110
 
@@ -25,17 +25,7 @@ const PAD = 16
 const HEADER_H = 44
 const HEIGHT = TOTAL_ROWS * UNIT + HEADER_H + PAD * 2
 
-// Column plan:
-// 0: R32 (matches 1-8)
-// 1: R32 (matches 9-16)
-// 2: R16
-// 3: QF
-// 4: SF
-// 5: F
-// 6: Winner
 const COLS = ['R32_L', 'R32_R', 'R16', 'QF', 'SF', 'F', 'W']
-
-// Round index for vertical math (bracket progression)
 const ROUND_INDEX = { R32: 0, R16: 1, QF: 2, SF: 3, F: 4 }
 
 function buildRoundMap(matches) {
@@ -83,13 +73,13 @@ function winnerTeamId(match) {
   if (!match?.is_final) return null
   const hs = match.home_score
   const as = match.away_score
-  if (hs === null || hs === undefined || as === null || as === undefined) return null
+  if (hs == null || as == null) return null
   if (hs === as) return null
   return hs > as ? match.home?.id || match.home_team_id : match.away?.id || match.away_team_id
 }
 
-function colX(colIndex) {
-  return PAD + colIndex * (COL_WIDTH + COL_GAP)
+function colX(i) {
+  return PAD + i * (COL_WIDTH + COL_GAP)
 }
 
 function centerRow(roundIndex, matchNo) {
@@ -105,14 +95,14 @@ function cardY(roundIndex, matchNo) {
   return cardCenterY(roundIndex, matchNo) - CARD_H / 2
 }
 
-function getTeamName(obj) {
-  return obj?.name || 'TBD'
+function getTeamName(t) {
+  return t?.name || 'TBD'
 }
 
-function getWinnerNameFromFinal(finalMatch, teamId) {
+function getWinnerName(finalMatch, teamId) {
   if (!finalMatch || !teamId) return null
-  if (finalMatch?.home?.id === teamId) return finalMatch?.home?.name || null
-  if (finalMatch?.away?.id === teamId) return finalMatch?.away?.name || null
+  if (finalMatch.home?.id === teamId) return finalMatch.home.name
+  if (finalMatch.away?.id === teamId) return finalMatch.away.name
   return null
 }
 
@@ -121,7 +111,7 @@ export default function KnockoutBracket({
   selections,
   locked = false,
   onSelect,
-  mode = 'picks', // 'picks' | 'view'
+  mode = 'picks',
   subtitle,
   showWinnerColumn = true
 }) {
@@ -129,47 +119,199 @@ export default function KnockoutBracket({
   const totalCols = showWinnerColumn ? COLS.length : COLS.length - 1
   const innerWidth = PAD * 2 + (totalCols - 1) * (COL_WIDTH + COL_GAP) + COL_WIDTH
 
-  // ✅ Connector lines
   const paths = []
 
-  // R32 -> R16 (split)
-  const r32 = roundMap.R32 || []
-  for (const m of r32) {
-    const n = m.match_no || 1
-
+  // R32 → R16 (split)
+  for (const m of roundMap.R32) {
+    const n = m.match_no
     const fromCol = n <= 8 ? 0 : 1
-    const toCol = 2 // R16 column
+    const toCol = 2
 
     const x1 = colX(fromCol) + COL_WIDTH
     const x2 = colX(toCol)
     const midX = (x1 + x2) / 2
 
     const y1 = cardCenterY(ROUND_INDEX.R32, n)
-
-    let r16No
-    if (n <= 8) {
-      r16No = Math.ceil(n / 2) // 1..4
-    } else {
-      r16No = 4 + Math.ceil((n - 8) / 2) // 5..8
-    }
+    const r16No = n <= 8 ? Math.ceil(n / 2) : 4 + Math.ceil((n - 8) / 2)
     const y2 = cardCenterY(ROUND_INDEX.R16, r16No)
 
     paths.push(`M ${x1} ${y1} H ${midX} V ${y2} H ${x2}`)
   }
 
-  // R16 -> QF -> SF -> F
   const chain = [
-    { from: 'R16', to: 'QF', fromCol: 2, toCol: 3, fromIdx: ROUND_INDEX.R16, toIdx: ROUND_INDEX.QF },
-    { from: 'QF', to: 'SF', fromCol: 3, toCol: 4, fromIdx: ROUND_INDEX.QF, toIdx: ROUND_INDEX.SF },
-    { from: 'SF', to: 'F', fromCol: 4, toCol: 5, fromIdx: ROUND_INDEX.SF, toIdx: ROUND_INDEX.F }
+    { f: 'R16', t: 'QF', fc: 2, tc: 3, fi: 1, ti: 2 },
+    { f: 'QF', t: 'SF', fc: 3, tc: 4, fi: 2, ti: 3 },
+    { f: 'SF', t: 'F', fc: 4, tc: 5, fi: 3, ti: 4 }
   ]
 
-  for (const step of chain) {
-    const fromMatches = roundMap[step.from] || []
-    for (const m of fromMatches) {
-      const fromNo = m.match_no || 1
+  for (const s of chain) {
+    for (const m of roundMap[s.f]) {
+      const fromNo = m.match_no
       const toNo = Math.ceil(fromNo / 2)
 
-      const x1 = colX(step.fromCol) + COL_WIDTH
-      const x2 = colX(step.toCol)
+      const x1 = colX(s.fc) + COL_WIDTH
+      const x2 = colX(s.tc)
       const midX = (x1 + x2) / 2
+
+      const y1 = cardCenterY(s.fi, fromNo)
+      const y2 = cardCenterY(s.ti, toNo)
+
+      paths.push(`M ${x1} ${y1} H ${midX} V ${y2} H ${x2}`)
+    }
+  }
+
+  if (showWinnerColumn) {
+    const x1 = colX(5) + COL_WIDTH
+    const x2 = colX(6)
+    const midX = (x1 + x2) / 2
+    const y = cardCenterY(ROUND_INDEX.F, 1)
+    paths.push(`M ${x1} ${y} H ${midX} H ${x2}`)
+  }
+
+  const finalMatch = roundMap.F[0]
+  const actualWinnerId = winnerTeamId(finalMatch)
+  const pickedWinnerId = finalMatch?.id && selections?.[finalMatch.id]
+
+  const winnerName =
+    getWinnerName(finalMatch, actualWinnerId) ||
+    getWinnerName(finalMatch, pickedWinnerId) ||
+    'TBD'
+
+  function renderCard(col, roundKey, roundIdx, m) {
+    const isR32 = roundKey === 'R32'
+    const matchId = m.id
+    const home = m.home
+    const away = m.away
+
+    const pick = selections?.[matchId]
+    const actual = winnerTeamId(m)
+
+    const cardBg =
+      pick && actual && pick === actual
+        ? 'rgba(34,197,94,.14)'
+        : pick && actual
+        ? 'rgba(248,113,113,.10)'
+        : 'rgba(255,255,255,.05)'
+
+    return (
+      <div
+        key={`${roundKey}-${m.match_no}-${col}`}
+        style={{
+          position: 'absolute',
+          left: colX(col),
+          top: cardY(roundIdx, m.match_no),
+          width: COL_WIDTH,
+          height: CARD_H,
+          padding: 12,
+          borderRadius: 16,
+          background: cardBg,
+          border: '1px solid rgba(255,255,255,.10)',
+          boxShadow: '0 10px 30px rgba(0,0,0,.25)'
+        }}
+      >
+        {/* Header row */}
+        {!isR32 && (
+          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, fontWeight: 900, opacity: 0.75 }}>
+            <span>Match {m.match_no}</span>
+            {m.is_final ? <span>✅ Final</span> : <span>Pending</span>}
+          </div>
+        )}
+
+        {/* Teams */}
+        <div style={{ marginTop: isR32 ? 4 : 8, display: 'grid', gap: 6 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+            <span style={{ fontWeight: 900 }}>{getTeamName(home)}</span>
+            {m.home_score != null && <span>{m.home_score}</span>}
+          </div>
+          <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+            <span style={{ fontWeight: 900 }}>{getTeamName(away)}</span>
+            {m.away_score != null && <span>{m.away_score}</span>}
+          </div>
+        </div>
+
+        {mode === 'picks' && !isR32 && (
+          <select
+            className="field"
+            disabled={locked || !home?.id || !away?.id}
+            value={pick ?? ''}
+            onChange={e => onSelect(matchId, e.target.value)}
+            style={{ marginTop: 10 }}
+          >
+            <option value="">Pick winner…</option>
+            <option value={home?.id}>{home?.name}</option>
+            <option value={away?.id}>{away?.name}</option>
+          </select>
+        )}
+      </div>
+    )
+  }
+
+  return (
+    <div className="card" style={{ marginTop: 18, padding: 14 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+        <div>
+          <div className="cardTitle">Knockout Bracket</div>
+          {subtitle && <div style={{ fontSize: 13, opacity: 0.8 }}>{subtitle}</div>}
+        </div>
+        <div style={{ fontSize: 12, opacity: 0.75 }}>Scroll → ↓</div>
+      </div>
+
+      <div style={{ marginTop: 12, overflow: 'auto', maxHeight: '70vh' }}>
+        <div style={{ position: 'relative', width: innerWidth, height: HEIGHT }}>
+          {/* Headers */}
+          <div style={{ position: 'absolute', left: colX(0), top: PAD, width: COL_WIDTH * 2 + COL_GAP, fontWeight: 900 }}>
+            {ROUND_LABEL.R32}
+          </div>
+
+          {['R16', 'QF', 'SF', 'F', ...(showWinnerColumn ? ['W'] : [])].map(r => {
+            const col =
+              r === 'R16' ? 2 :
+              r === 'QF' ? 3 :
+              r === 'SF' ? 4 :
+              r === 'F' ? 5 :
+              6
+
+            return (
+              <div key={r} style={{ position: 'absolute', left: colX(col), top: PAD, width: COL_WIDTH, fontWeight: 900 }}>
+                {ROUND_LABEL[r]}
+              </div>
+            )
+          })}
+
+          {/* Lines */}
+          <svg width={innerWidth} height={HEIGHT} style={{ position: 'absolute', top: 0, left: 0, opacity: 0.55 }}>
+            {paths.map((d, i) => (
+              <path key={i} d={d} fill="none" stroke="rgba(255,255,255,.22)" strokeWidth="2" />
+            ))}
+          </svg>
+
+          {/* Cards */}
+          {roundMap.R32.map(m => renderCard(m.match_no <= 8 ? 0 : 1, 'R32', 0, m))}
+          {roundMap.R16.map(m => renderCard(2, 'R16', 1, m))}
+          {roundMap.QF.map(m => renderCard(3, 'QF', 2, m))}
+          {roundMap.SF.map(m => renderCard(4, 'SF', 3, m))}
+          {roundMap.F.map(m => renderCard(5, 'F', 4, m))}
+
+          {showWinnerColumn && (
+            <div
+              style={{
+                position: 'absolute',
+                left: colX(6),
+                top: cardY(ROUND_INDEX.F, 1),
+                width: COL_WIDTH,
+                height: CARD_H,
+                padding: 12,
+                borderRadius: 16,
+                background: 'rgba(255,255,255,.05)',
+                border: '1px solid rgba(255,255,255,.10)'
+              }}
+            >
+              <div style={{ fontWeight: 900 }}>Winner</div>
+              <div style={{ marginTop: 8, fontWeight: 900, fontSize: 16 }}>{winnerName}</div>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
