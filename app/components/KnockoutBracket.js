@@ -13,12 +13,17 @@ const ROUND_LABEL = {
 }
 const ROUND_MATCH_COUNTS = { R32: 16, R16: 8, QF: 4, SF: 2, F: 1 }
 
-const COL_WIDTH = 240
-const COL_GAP = 70
-const UNIT = 26
-const TOTAL_ROWS = 32
-const HEIGHT = TOTAL_ROWS * UNIT
-const CARD_H = 74
+// ✅ Layout tuning (less congested)
+const COL_WIDTH = 270
+const COL_GAP = 100
+
+const UNIT = 44            // vertical unit (bigger = more spacing)
+const TOTAL_ROWS = 32      // scaffold rows for R32
+const CARD_H = 86          // card height
+
+const PAD = 16
+const HEADER_H = 44        // reserve space for round headers
+const HEIGHT = TOTAL_ROWS * UNIT + HEADER_H + PAD * 2
 
 function buildRoundMap(matches) {
   const map = {}
@@ -71,22 +76,23 @@ function winnerTeamId(match) {
   return hs > as ? match.home?.id || match.home_team_id : match.away?.id || match.away_team_id
 }
 
+function colX(roundIndex) {
+  return PAD + roundIndex * (COL_WIDTH + COL_GAP)
+}
+
 function centerRow(roundIndex, matchNo) {
+  // matchNo starts at 1, roundIndex 0=R32
   const mult = Math.pow(2, roundIndex)
   return (2 * matchNo - 1) * mult
 }
 
-function cardY(roundIndex, matchNo) {
-  const cy = centerRow(roundIndex, matchNo) * UNIT
-  return cy - CARD_H / 2
-}
-
 function cardCenterY(roundIndex, matchNo) {
-  return centerRow(roundIndex, matchNo) * UNIT
+  // push everything down by HEADER_H
+  return PAD + HEADER_H + centerRow(roundIndex, matchNo) * UNIT
 }
 
-function colX(roundIndex) {
-  return roundIndex * (COL_WIDTH + COL_GAP)
+function cardY(roundIndex, matchNo) {
+  return cardCenterY(roundIndex, matchNo) - CARD_H / 2
 }
 
 function getTeamName(obj) {
@@ -98,20 +104,22 @@ export default function KnockoutBracket({
   selections,
   locked = false,
   onSelect,
-  mode = 'picks',
+  mode = 'picks', // 'picks' | 'view'
   subtitle,
   showWinnerColumn = true
 }) {
   const roundMap = ensureSlots(buildRoundMap(matches))
   const roundsToRender = showWinnerColumn ? [...ROUND_ORDER, 'W'] : [...ROUND_ORDER]
   const totalCols = roundsToRender.length
-  const innerWidth = (totalCols - 1) * (COL_WIDTH + COL_GAP) + COL_WIDTH
+  const innerWidth = PAD * 2 + (totalCols - 1) * (COL_WIDTH + COL_GAP) + COL_WIDTH
 
+  // Connector lines
   const paths = []
   for (let rIndex = 0; rIndex < ROUND_ORDER.length - 1; rIndex++) {
     const fromRound = ROUND_ORDER[rIndex]
     const x1 = colX(rIndex) + COL_WIDTH
     const x2 = colX(rIndex + 1)
+    const midX = x1 + COL_GAP / 2
 
     const fromMatches = roundMap[fromRound] || []
     for (const m of fromMatches) {
@@ -119,11 +127,11 @@ export default function KnockoutBracket({
       const toNo = Math.ceil(fromNo / 2)
       const y1 = cardCenterY(rIndex, fromNo)
       const y2 = cardCenterY(rIndex + 1, toNo)
-      const midX = x1 + COL_GAP / 2
       paths.push(`M ${x1} ${y1} H ${midX} V ${y2} H ${x2}`)
     }
   }
 
+  // Final -> Winner connector
   if (showWinnerColumn) {
     const finalX1 = colX(ROUND_ORDER.length - 1) + COL_WIDTH
     const winX2 = colX(ROUND_ORDER.length)
@@ -132,6 +140,7 @@ export default function KnockoutBracket({
     paths.push(`M ${finalX1} ${y} H ${midX} H ${winX2}`)
   }
 
+  // Winner card data
   const finalMatch = (roundMap.F || [])[0]
   const actualWinnerId = winnerTeamId(finalMatch)
   const pickedWinnerId = finalMatch?.id && selections ? selections[finalMatch.id] : null
@@ -204,7 +213,7 @@ export default function KnockoutBracket({
           )}
         </div>
 
-        <div style={{ marginTop: 6, display: 'grid', gap: 6 }}>
+        <div style={{ marginTop: 8, display: 'grid', gap: 6 }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10 }}>
             <div style={{ fontWeight: 900 }}>{getTeamName(home)}</div>
             {matchObj?.home_score !== null && matchObj?.home_score !== undefined && (
@@ -258,30 +267,34 @@ export default function KnockoutBracket({
           <div className="cardTitle" style={{ marginBottom: 4 }}>Knockout Bracket</div>
           {subtitle ? <div style={{ fontSize: 13, opacity: 0.8 }}>{subtitle}</div> : null}
         </div>
-        <div style={{ fontSize: 12, opacity: 0.75, fontWeight: 900 }}>Mobile: scroll →</div>
+        <div style={{ fontSize: 12, opacity: 0.75, fontWeight: 900 }}>
+          Scroll → (and ↓ if needed)
+        </div>
       </div>
 
+      {/* ✅ Let it scroll vertically too (brackets are tall) */}
       <div
         style={{
           marginTop: 12,
           overflowX: 'auto',
-          overflowY: 'hidden',
+          overflowY: 'auto',
           WebkitOverflowScrolling: 'touch',
           borderRadius: 16,
           border: '1px solid rgba(255,255,255,.10)',
-          background: 'rgba(0,0,0,.12)'
+          background: 'rgba(0,0,0,.12)',
+          maxHeight: '70vh' // key: prevents “everything squished”
         }}
       >
-        <div style={{ position: 'relative', width: innerWidth, height: HEIGHT, padding: 16 }}>
+        <div style={{ position: 'relative', width: innerWidth, height: HEIGHT }}>
+          {/* Round headers */}
           {roundsToRender.map((r, idx) => (
             <div
               key={`hdr-${r}`}
               style={{
                 position: 'absolute',
                 left: colX(idx),
-                top: 0,
+                top: PAD,
                 width: COL_WIDTH,
-                paddingBottom: 8,
                 fontWeight: 900,
                 opacity: 0.9
               }}
@@ -290,21 +303,30 @@ export default function KnockoutBracket({
             </div>
           ))}
 
+          {/* Connector lines */}
           <svg
             width={innerWidth}
             height={HEIGHT}
             style={{ position: 'absolute', left: 0, top: 0, pointerEvents: 'none', opacity: 0.55 }}
           >
             {paths.map((d, i) => (
-              <path key={i} d={d} fill="none" stroke="rgba(255,255,255,.22)" strokeWidth="2" />
+              <path
+                key={i}
+                d={d}
+                fill="none"
+                stroke="rgba(255,255,255,.22)"
+                strokeWidth="2"
+              />
             ))}
           </svg>
 
+          {/* Match cards */}
           {ROUND_ORDER.map((r, rIndex) => {
             const list = roundMap[r] || []
             return list.map(m => renderMatchCard(r, rIndex, m))
           })}
 
+          {/* Winner column */}
           {showWinnerColumn && (
             <div
               style={{
