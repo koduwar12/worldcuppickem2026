@@ -225,7 +225,7 @@ export default function KnockoutBracket({
 
     const isR32 = roundKey === 'R32'
     const showMatchLabel = !isR32
-    const showPending = !isR32 // ✅ hide Pending for R32
+    const showPending = !isR32 // hide Pending for R32
 
     return (
       <div
@@ -240,10 +240,10 @@ export default function KnockoutBracket({
           borderRadius: 16,
           background: cardBg,
           border: cardBorder,
-          boxShadow: '0 10px 30px rgba(0,0,0,.25)'
+          boxShadow: '0 10px 30px rgba(0,0,0,.25)',
+          zIndex: 2 // ✅ always above SVG
         }}
       >
-        {/* Header row */}
         <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, minHeight: 16 }}>
           <div style={{ fontSize: 12, opacity: 0.75, fontWeight: 900 }}>
             {showMatchLabel ? `Match ${matchNo}` : ''}
@@ -258,7 +258,6 @@ export default function KnockoutBracket({
           )}
         </div>
 
-        {/* Teams */}
         <div style={{ marginTop: showMatchLabel ? 8 : 2, display: 'grid', gap: 6 }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10 }}>
             <div style={{ fontWeight: 900 }}>{getTeamName(home)}</div>
@@ -275,7 +274,6 @@ export default function KnockoutBracket({
           </div>
         </div>
 
-        {/* ✅ Picks dropdown for ALL rounds (including R32) */}
         {mode === 'picks' && (
           <div style={{ marginTop: 10 }}>
             <select
@@ -332,7 +330,6 @@ export default function KnockoutBracket({
         }}
       >
         <div style={{ position: 'relative', width: innerWidth, height: HEIGHT }}>
-          {/* Round of 32 header spans BOTH R32 columns */}
           <div
             style={{
               position: 'absolute',
@@ -340,13 +337,13 @@ export default function KnockoutBracket({
               top: PAD,
               width: COL_WIDTH * 2 + COL_GAP,
               fontWeight: 900,
-              opacity: 0.9
+              opacity: 0.9,
+              zIndex: 1
             }}
           >
             {ROUND_LABEL.R32}
           </div>
 
-          {/* Other round headers */}
           {['R16', 'QF', 'SF', 'F', ...(showWinnerColumn ? ['W'] : [])].map(r => {
             const colIndex =
               r === 'R16' ? 2 :
@@ -364,7 +361,8 @@ export default function KnockoutBracket({
                   top: PAD,
                   width: COL_WIDTH,
                   fontWeight: 900,
-                  opacity: 0.9
+                  opacity: 0.9,
+                  zIndex: 1
                 }}
               >
                 {ROUND_LABEL[r] || r}
@@ -372,11 +370,18 @@ export default function KnockoutBracket({
             )
           })}
 
-          {/* Connector lines */}
+          {/* ✅ IMPORTANT: don't let SVG steal clicks */}
           <svg
             width={innerWidth}
             height={HEIGHT}
-            style={{ position: 'absolute', left: 0, top: 0, pointerEvents: 'none', opacity: 0.55 }}
+            style={{
+              position: 'absolute',
+              left: 0,
+              top: 0,
+              opacity: 0.55,
+              pointerEvents: 'none', // ✅ fix
+              zIndex: 0
+            }}
           >
             {paths.map((d, i) => (
               <path
@@ -389,20 +394,17 @@ export default function KnockoutBracket({
             ))}
           </svg>
 
-          {/* R32 split across two columns */}
           {(roundMap.R32 || []).map(m => {
             const n = m.match_no || 1
             const colIndex = n <= 8 ? 0 : 1
             return renderMatchCard(colIndex, 'R32', ROUND_INDEX.R32, m)
           })}
 
-          {/* Other rounds */}
           {(roundMap.R16 || []).map(m => renderMatchCard(2, 'R16', ROUND_INDEX.R16, m))}
           {(roundMap.QF || []).map(m => renderMatchCard(3, 'QF', ROUND_INDEX.QF, m))}
           {(roundMap.SF || []).map(m => renderMatchCard(4, 'SF', ROUND_INDEX.SF, m))}
           {(roundMap.F || []).map(m => renderMatchCard(5, 'F', ROUND_INDEX.F, m))}
 
-          {/* Winner column */}
           {showWinnerColumn && (
             <div
               style={{
@@ -423,7 +425,8 @@ export default function KnockoutBracket({
                   : pickedWinnerId
                   ? '1px solid rgba(56,189,248,.22)'
                   : '1px solid rgba(255,255,255,.10)',
-                boxShadow: '0 10px 30px rgba(0,0,0,.25)'
+                boxShadow: '0 10px 30px rgba(0,0,0,.25)',
+                zIndex: 2
               }}
             >
               <div style={{ fontSize: 12, opacity: 0.75, fontWeight: 900 }}>Winner</div>
