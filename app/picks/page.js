@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { supabase } from '../../lib/supabaseClient'
 
 /**
@@ -17,6 +17,13 @@ const parseKey = key => {
   return { group_id, position: Number(posStr) }
 }
 
+function arrayMove(arr, from, to) {
+  const copy = [...arr]
+  const [item] = copy.splice(from, 1)
+  copy.splice(to, 0, item)
+  return copy
+}
+
 export default function PicksPage() {
   const [user, setUser] = useState(null)
   const [groups, setGroups] = useState([])
@@ -28,9 +35,34 @@ export default function PicksPage() {
   const deadline = useMemo(() => new Date(DEADLINE_UTC), [])
   const locked = Date.now() >= deadline.getTime()
 
+  // Drag state
+  const dragFromRef = useRef(null)
+  const [dragOverKey, setDragOverKey] = useState(null) // `${groupId}::${index}`
+
+  // Auto-scroll while dragging
+  const scrollRef = useRef(null)
+  const autoScrollRef = useRef({ active: false, lastY: 0 })
+  const rafRef = useRef(null)
+
+  // Mobile tap-to-move state
+  // { groupId, fromIndex } means "picked up" item
+  const [tapPick, setTapPick] = useState(null)
+
+  // Little "flash" animation after drop/move
+  const [flashKey, setFlashKey] = useState(null)
+  const flashTimerRef = useRef(null)
+
   useEffect(() => {
     load()
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  useEffect(() => {
+    // cleanup
+    return () => {
+      if (rafRef.current) cancelAnimationFrame(rafRef.current)
+      if (flashTimerRef.current) clearTimeout(flashTimerRef.current)
+    }
   }, [])
 
   function deadlineLabelEST() {
@@ -69,7 +101,6 @@ export default function PicksPage() {
       return
     }
 
-    // We load both position + rank (table currently seems to have both)
     const { data: pickData, error: pErr } = await supabase
       .from('group_picks')
       .select('group_id, team_id, position, rank, submitted_at')
@@ -99,6 +130,49 @@ export default function PicksPage() {
     setLoading(false)
   }
 
+  // Build an ordered list of team IDs for a group:
+  // 1) Use saved picks order (1..n) if present
+  // 2) Append any missing teams (so list always contains all teams exactly once)
+  function getOrderForGroup(group) {
+    const groupId = group.id
+    const n = group?.teams?.length || 0
+
+    const pickedInOrder = []
+    for (let pos = 1; pos <= n; pos++) {
+      const v = picks[makeKey(groupId, pos)]
+      if (v) pickedInOrder.push(String(v))
+    }
+
+    const used = new Set(pickedInOrder)
+    const remaining = (group.teams || [])
+      .map(t => String(t.id))
+      .filter(id => !used.has(id))
+
+    return [...pickedInOrder, ...remaining].slice(0, n)
+  }
+
+  function applyOrderToPicks(groupId, orderIds) {
+    setPicks(prev => {
+      const next = { ...prev }
+      // Clear existing keys for this group (prevents stale duplicates)
+      for (let i = 1; i <= 50; i++) {
+        const k = makeKey(groupId, i)
+        if (k in next) delete next[k]
+      }
+      for (let i = 0; i < orderIds.length; i++) {
+        next[makeKey(groupId, i + 1)] = orderIds[i]
+      }
+      return next
+    })
+  }
+
+  function flash(groupId, index) {
+    const k = `${groupId}::${index}`
+    setFlashKey(k)
+    if (flashTimerRef.current) clearTimeout(flashTimerRef.current)
+    flashTimerRef.current = setTimeout(() => setFlashKey(null), 380)
+  }
+
   async function saveDraft() {
     if (!user) return
     if (locked) {
@@ -108,7 +182,6 @@ export default function PicksPage() {
 
     setMsg('Saving...')
 
-    // If already submitted, keep submitted_at (don’t “unsubmit” on save)
     const keepSubmittedAt = submittedAt || null
 
     const rows = Object.entries(picks)
@@ -120,23 +193,23 @@ export default function PicksPage() {
 
         return {
           user_id: user.id,
-          group_id,         // UUID string
-          team_id: teamId,  // UUID string
-          position,         // ✅ required by unique constraint
-          rank: position,   // ✅ required NOT NULL in your DB
+          group_id,
+          team_id: teamId, // UUID string
+          position,
+          rank: position, // satisfy NOT NULL rank too
           submitted_at: keepSubmittedAt
         }
       })
       .filter(Boolean)
 
     if (rows.length === 0) {
-      setMsg('Pick at least one team before saving.')
+      setMsg('Make at least one pick before saving.')
       return
     }
 
     const { error } = await supabase
       .from('group_picks')
-      .upsert(rows, { onConflict: 'user_id,group_id,position' }) // ✅ match your unique key
+      .upsert(rows, { onConflict: 'user_id,group_id,position' })
 
     setMsg(error ? error.message : 'Saved ✅')
   }
@@ -172,8 +245,8 @@ export default function PicksPage() {
           user_id: user.id,
           group_id,
           team_id: teamId,
-          position,        // ✅ required by unique constraint
-          rank: position,  // ✅ satisfies NOT NULL rank constraint
+          position,
+          rank: position,
           submitted_at: now
         }
       })
@@ -198,6 +271,139 @@ export default function PicksPage() {
     setMsg('Submitted ✅ (You can still edit until the deadline)')
   }
 
+  function resetGroup(group) {
+    const defaultOrder = (group.teams || []).map(t => String(t.id))
+    applyOrderToPicks(group.id, defaultOrder)
+    setTapPick(null)
+  }
+
+  function teamNameById(group, id) {
+    const t = (group.teams || []).find(x => String(x.id) === String(id))
+    return t?.name || 'TBD'
+  }
+
+  // ---------- AUTO SCROLL ----------
+  function startAutoScroll(yClient) {
+    autoScrollRef.current.active = true
+    autoScrollRef.current.lastY = yClient
+
+    const step = () => {
+      if (!autoScrollRef.current.active) return
+      const el = scrollRef.current
+      if (el) {
+        const rect = el.getBoundingClientRect()
+        const y = autoScrollRef.current.lastY
+        const edge = 80 // px
+        const maxSpeed = 18
+
+        let delta = 0
+        if (y < rect.top + edge) {
+          const pct = Math.max(0, (rect.top + edge - y) / edge)
+          delta = -Math.ceil(pct * maxSpeed)
+        } else if (y > rect.bottom - edge) {
+          const pct = Math.max(0, (y - (rect.bottom - edge)) / edge)
+          delta = Math.ceil(pct * maxSpeed)
+        }
+        if (delta !== 0) el.scrollTop += delta
+      }
+      rafRef.current = requestAnimationFrame(step)
+    }
+
+    if (!rafRef.current) rafRef.current = requestAnimationFrame(step)
+  }
+
+  function updateAutoScroll(yClient) {
+    autoScrollRef.current.lastY = yClient
+  }
+
+  function stopAutoScroll() {
+    autoScrollRef.current.active = false
+    if (rafRef.current) {
+      cancelAnimationFrame(rafRef.current)
+      rafRef.current = null
+    }
+  }
+
+  // ---------- DRAG HANDLERS ----------
+  function onDragStart(groupId, fromIndex) {
+    dragFromRef.current = { groupId, fromIndex }
+    // when dragging, clear tap mode
+    setTapPick(null)
+  }
+
+  function onDragOver(e, groupId, toIndex) {
+    e.preventDefault()
+    setDragOverKey(`${groupId}::${toIndex}`)
+    startAutoScroll(e.clientY)
+    updateAutoScroll(e.clientY)
+  }
+
+  function onDragEnd() {
+    stopAutoScroll()
+    setDragOverKey(null)
+    dragFromRef.current = null
+  }
+
+  function onDrop(group, toIndex) {
+    stopAutoScroll()
+    const info = dragFromRef.current
+    dragFromRef.current = null
+    setDragOverKey(null)
+
+    if (!info) return
+    if (info.groupId !== group.id) return
+    if (info.fromIndex === toIndex) return
+
+    const order = getOrderForGroup(group)
+    const moved = arrayMove(order, info.fromIndex, toIndex)
+    applyOrderToPicks(group.id, moved)
+    flash(group.id, toIndex)
+  }
+
+  // ---------- MOBILE TAP-TO-MOVE ----------
+  function onTapItem(group, index) {
+    if (locked) return
+
+    // If nothing selected, pick it up
+    if (!tapPick) {
+      setTapPick({ groupId: group.id, fromIndex: index })
+      return
+    }
+
+    // If different group, switch to new pick-up
+    if (tapPick.groupId !== group.id) {
+      setTapPick({ groupId: group.id, fromIndex: index })
+      return
+    }
+
+    // If tapping the same item, cancel
+    if (tapPick.fromIndex === index) {
+      setTapPick(null)
+      return
+    }
+
+    // Drop onto tapped index
+    const order = getOrderForGroup(group)
+    const moved = arrayMove(order, tapPick.fromIndex, index)
+    applyOrderToPicks(group.id, moved)
+    flash(group.id, index)
+    setTapPick({ groupId: group.id, fromIndex: index }) // keep "holding" the moved item (feels fast)
+  }
+
+  function moveUp(group, index) {
+    if (index <= 0) return
+    const order = getOrderForGroup(group)
+    applyOrderToPicks(group.id, arrayMove(order, index, index - 1))
+    flash(group.id, index - 1)
+  }
+
+  function moveDown(group, index) {
+    const order = getOrderForGroup(group)
+    if (index >= order.length - 1) return
+    applyOrderToPicks(group.id, arrayMove(order, index, index + 1))
+    flash(group.id, index + 1)
+  }
+
   if (loading) {
     return (
       <div className="container">
@@ -217,7 +423,8 @@ export default function PicksPage() {
 
       <h1 className="h1" style={{ marginTop: 14 }}>Group Picks</h1>
       <p className="sub">
-        You can edit anytime until <strong>{deadlineLabelEST()}</strong>. After that, picks lock for everyone.
+        Drag teams to rank them. On mobile you can also tap a team, then tap where to drop it. Deadline:{' '}
+        <strong>{deadlineLabelEST()}</strong>
       </p>
 
       <div className="card" style={{ marginTop: 12 }}>
@@ -234,42 +441,159 @@ export default function PicksPage() {
         )}
       </div>
 
+      {tapPick && !locked && (
+        <div className="badge" style={{ marginTop: 10 }}>
+          📌 Tap-move mode: selected a team. Tap another rank to drop it (tap again to cancel).
+        </div>
+      )}
+
       {msg && <p style={{ marginTop: 10 }}>{msg}</p>}
 
-      {groups.map(group => (
-        <div key={group.id} className="card" style={{ marginTop: 18 }}>
-          <h2 className="cardTitle">{group.name}</h2>
-          <p className="cardSub">Rank teams from 1st to last</p>
+      {/* Scroll container used for auto-scroll while dragging */}
+      <div
+        ref={scrollRef}
+        style={{
+          marginTop: 10,
+          maxHeight: '75vh',
+          overflowY: 'auto',
+          paddingRight: 2
+        }}
+      >
+        {groups.map(group => {
+          const order = getOrderForGroup(group)
 
-          {group.teams.map((team, index) => {
-            const position = index + 1
-            const k = makeKey(group.id, position)
+          return (
+            <div key={group.id} className="card" style={{ marginTop: 18 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, alignItems: 'center' }}>
+                <div>
+                  <h2 className="cardTitle" style={{ marginBottom: 4 }}>{group.name}</h2>
+                  <p className="cardSub" style={{ marginTop: 0 }}>
+                    Drag to reorder. Mobile: tap-to-move or ↑ ↓.
+                  </p>
+                </div>
 
-            return (
-              <div key={team.id} style={{ marginBottom: 8 }}>
-                <select
-                  className="field"
-                  disabled={locked}
-                  value={picks[k] || ''}
-                  onChange={e =>
-                    setPicks(prev => ({
-                      ...prev,
-                      [k]: e.target.value
-                    }))
-                  }
-                >
-                  <option value="">Rank {position}</option>
-                  {group.teams.map(t => (
-                    <option key={t.id} value={t.id}>
-                      {t.name}
-                    </option>
-                  ))}
-                </select>
+                <button className="btn" disabled={locked} onClick={() => resetGroup(group)}>
+                  Reset
+                </button>
               </div>
-            )
-          })}
-        </div>
-      ))}
+
+              <div style={{ display: 'grid', gap: 10, marginTop: 12 }}>
+                {order.map((teamId, index) => {
+                  const isOver = dragOverKey === `${group.id}::${index}`
+                  const isTapSelected = tapPick?.groupId === group.id && tapPick?.fromIndex === index
+                  const isFlash = flashKey === `${group.id}::${index}`
+
+                  return (
+                    <div
+                      key={`${group.id}-${teamId}`}
+                      draggable={!locked}
+                      onDragStart={() => onDragStart(group.id, index)}
+                      onDragOver={e => onDragOver(e, group.id, index)}
+                      onDragEnd={onDragEnd}
+                      onDrop={() => onDrop(group, index)}
+                      onClick={() => onTapItem(group, index)}
+                      style={{
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        gap: 10,
+                        alignItems: 'center',
+                        padding: 12,
+                        borderRadius: 14,
+                        cursor: locked ? 'default' : 'pointer',
+                        transition: 'transform 140ms ease, background 140ms ease, border-color 140ms ease',
+                        transform: isFlash ? 'scale(1.01)' : 'scale(1)',
+                        background: isTapSelected
+                          ? 'rgba(56,189,248,.16)'
+                          : isOver
+                          ? 'rgba(56,189,248,.12)'
+                          : 'rgba(255,255,255,.06)',
+                        border: isTapSelected
+                          ? '1px solid rgba(56,189,248,.35)'
+                          : isOver
+                          ? '1px solid rgba(56,189,248,.28)'
+                          : '1px solid rgba(255,255,255,.12)',
+                        boxShadow: isOver || isTapSelected ? '0 10px 30px rgba(0,0,0,.25)' : 'none',
+                        userSelect: 'none'
+                      }}
+                      title={!locked ? 'Drag or tap to move' : 'Locked'}
+                    >
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                        <div
+                          style={{
+                            width: 36,
+                            height: 28,
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            borderRadius: 10,
+                            background: 'rgba(0,0,0,.22)',
+                            border: '1px solid rgba(255,255,255,.10)',
+                            fontWeight: 900
+                          }}
+                          title="Rank"
+                        >
+                          #{index + 1}
+                        </div>
+
+                        <div style={{ display: 'flex', flexDirection: 'column' }}>
+                          <div style={{ fontWeight: 900 }}>{teamNameById(group, teamId)}</div>
+                          <div style={{ fontSize: 12, opacity: 0.7, fontWeight: 800 }}>
+                            {locked ? 'Locked' : isTapSelected ? 'Selected (tap a new rank)' : 'Drag or tap to move'}
+                          </div>
+                        </div>
+                      </div>
+
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                        <button
+                          className="btn"
+                          disabled={locked || index === 0}
+                          onClick={e => {
+                            e.stopPropagation()
+                            moveUp(group, index)
+                          }}
+                          title="Move up"
+                        >
+                          ↑
+                        </button>
+
+                        <button
+                          className="btn"
+                          disabled={locked || index === order.length - 1}
+                          onClick={e => {
+                            e.stopPropagation()
+                            moveDown(group, index)
+                          }}
+                          title="Move down"
+                        >
+                          ↓
+                        </button>
+
+                        <div
+                          title="Drag handle"
+                          style={{
+                            width: 42,
+                            height: 34,
+                            borderRadius: 12,
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            background: 'rgba(0,0,0,.20)',
+                            border: '1px solid rgba(255,255,255,.10)',
+                            fontWeight: 900,
+                            opacity: locked ? 0.4 : 0.9
+                          }}
+                        >
+                          ⠿
+                        </div>
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            </div>
+          )
+        })}
+      </div>
 
       <div className="row" style={{ marginTop: 20 }}>
         <button className="btn" disabled={locked} onClick={saveDraft}>
@@ -282,3 +606,4 @@ export default function PicksPage() {
     </div>
   )
 }
+
