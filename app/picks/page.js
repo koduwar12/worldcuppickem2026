@@ -9,6 +9,16 @@ import { supabase } from '../../lib/supabaseClient'
  */
 const DEADLINE_UTC = '2026-03-11T05:00:00Z'
 
+// ✅ Safe separator (UUIDs contain "-" so we must NOT split on "-")
+const KEY_SEP = '::'
+const makeKey = (groupId, position) => `${groupId}${KEY_SEP}${position}`
+const parseKey = key => {
+  const parts = String(key).split(KEY_SEP)
+  const group_id = parts[0]
+  const position = Number(parts[1])
+  return { group_id, position }
+}
+
 export default function PicksPage() {
   const [user, setUser] = useState(null)
   const [groups, setGroups] = useState([])
@@ -65,7 +75,7 @@ export default function PicksPage() {
     let sub = null
 
     ;(pickData || []).forEach(p => {
-      map[`${p.group_id}-${p.position}`] = p.team_id
+      map[makeKey(p.group_id, p.position)] = p.team_id
       if (p.submitted_at) sub = p.submitted_at
     })
 
@@ -83,21 +93,25 @@ export default function PicksPage() {
 
     setMsg('Saving...')
 
-    // IMPORTANT:
     // If they've already submitted once, DO NOT clear submitted_at.
-    // (Option A: only submitted picks count. We don't want "Save Draft" to accidentally un-submit them.)
     const keepSubmittedAt = submittedAt || null
 
-    const rows = Object.entries(picks).map(([key, teamId]) => {
-      const [group_id, position] = key.split('-')
-      return {
-        user_id: user.id,
-        group_id: Number(group_id),
-        team_id: Number(teamId),
-        position: Number(position),
-        submitted_at: keepSubmittedAt
-      }
-    })
+    const rows = Object.entries(picks)
+      .map(([key, teamId]) => {
+        const { group_id, position } = parseKey(key)
+
+        // ✅ guard against bad keys
+        if (!group_id || !Number.isFinite(position) || !teamId) return null
+
+        return {
+          user_id: user.id,
+          group_id, // ✅ keep as string (UUID safe)
+          team_id: Number(teamId),
+          position,
+          submitted_at: keepSubmittedAt
+        }
+      })
+      .filter(Boolean)
 
     const { error } = await supabase.from('group_picks').upsert(rows)
     setMsg(error ? error.message : 'Saved ✅')
@@ -113,7 +127,7 @@ export default function PicksPage() {
     // Require full rankings before submit
     for (const g of groups) {
       for (let pos = 1; pos <= g.teams.length; pos++) {
-        if (!picks[`${g.id}-${pos}`]) {
+        if (!picks[makeKey(g.id, pos)]) {
           setMsg('Please complete all group rankings before submitting.')
           return
         }
@@ -123,16 +137,27 @@ export default function PicksPage() {
     const now = new Date().toISOString()
     setMsg('Submitting...')
 
-    const rows = Object.entries(picks).map(([key, teamId]) => {
-      const [group_id, position] = key.split('-')
-      return {
-        user_id: user.id,
-        group_id: Number(group_id),
-        team_id: Number(teamId),
-        position: Number(position),
-        submitted_at: now
-      }
-    })
+    const rows = Object.entries(picks)
+      .map(([key, teamId]) => {
+        const { group_id, position } = parseKey(key)
+        if (!group_id || !Number.isFinite(position) || !teamId) return null
+
+        return {
+          user_id: user.id,
+          group_id, // ✅ keep as string (UUID safe)
+          team_id: Number(teamId),
+          position,
+          submitted_at: now
+        }
+      })
+      .filter(Boolean)
+
+    // Extra safety: ensure no null group_id rows
+    const bad = rows.find(r => !r.group_id)
+    if (bad) {
+      setMsg('Internal error: a pick is missing group_id. Please refresh and try again.')
+      return
+    }
 
     const { error } = await supabase.from('group_picks').upsert(rows)
     if (error) {
@@ -145,15 +170,16 @@ export default function PicksPage() {
   }
 
   function deadlineLabelEST() {
-    // Show as Eastern time (browser will localize; label explains intent)
-    return new Date(DEADLINE_UTC).toLocaleString('en-US', {
-      timeZone: 'America/New_York',
-      year: 'numeric',
-      month: 'long',
-      day: 'numeric',
-      hour: 'numeric',
-      minute: '2-digit'
-    }) + ' ET'
+    return (
+      new Date(DEADLINE_UTC).toLocaleString('en-US', {
+        timeZone: 'America/New_York',
+        year: 'numeric',
+        month: 'long',
+        day: 'numeric',
+        hour: 'numeric',
+        minute: '2-digit'
+      }) + ' ET'
+    )
   }
 
   if (loading) {
@@ -166,7 +192,6 @@ export default function PicksPage() {
 
   return (
     <div className="container">
-      {/* ---------- TOP NAV ---------- */}
       <div className="nav">
         <a className="pill" href="/">🏠 Main Menu</a>
         <a className="pill" href="/standings">📊 Standings</a>
@@ -179,12 +204,9 @@ export default function PicksPage() {
         You can edit anytime until <strong>{deadlineLabelEST()}</strong>. After that, picks lock for everyone.
       </p>
 
-      {/* Status banner */}
       <div className="card" style={{ marginTop: 12 }}>
         {locked ? (
-          <p style={{ margin: 0, fontWeight: 800 }}>
-            🔒 Locked — deadline has passed.
-          </p>
+          <p style={{ margin: 0, fontWeight: 800 }}>🔒 Locked — deadline has passed.</p>
         ) : submittedAt ? (
           <p style={{ margin: 0, fontWeight: 800 }}>
             ✅ Submitted (counts for scoring). You can still edit and re-submit until the deadline.
@@ -205,16 +227,18 @@ export default function PicksPage() {
 
           {group.teams.map((team, index) => {
             const position = index + 1
+            const k = makeKey(group.id, position)
+
             return (
               <div key={team.id} style={{ marginBottom: 8 }}>
                 <select
                   className="field"
                   disabled={locked}
-                  value={picks[`${group.id}-${position}`] || ''}
+                  value={picks[k] || ''}
                   onChange={e =>
                     setPicks(prev => ({
                       ...prev,
-                      [`${group.id}-${position}`]: e.target.value
+                      [k]: e.target.value
                     }))
                   }
                 >
