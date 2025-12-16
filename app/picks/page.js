@@ -100,18 +100,26 @@ export default function PicksPage() {
       .map(([key, teamId]) => {
         const { group_id, position } = parseKey(key)
 
-        // ✅ guard against bad keys
-        if (!group_id || !Number.isFinite(position) || !teamId) return null
+        // ✅ Only save complete pick slots. Draft save should NOT write null team_id.
+        if (!group_id) return null
+        if (!Number.isFinite(position)) return null
+        if (!teamId) return null // covers '' / null / undefined
 
         return {
           user_id: user.id,
-          group_id, // ✅ keep as string (UUID safe)
-          team_id: Number(teamId),
+          group_id,      // ✅ UUID string
+          team_id: teamId, // ✅ UUID string (do NOT Number() this)
           position,
           submitted_at: keepSubmittedAt
         }
       })
       .filter(Boolean)
+
+    // If nothing picked yet, don't call upsert (avoids confusing states)
+    if (rows.length === 0) {
+      setMsg('Pick at least one team before saving.')
+      return
+    }
 
     const { error } = await supabase.from('group_picks').upsert(rows)
     setMsg(error ? error.message : 'Saved ✅')
@@ -140,22 +148,24 @@ export default function PicksPage() {
     const rows = Object.entries(picks)
       .map(([key, teamId]) => {
         const { group_id, position } = parseKey(key)
-        if (!group_id || !Number.isFinite(position) || !teamId) return null
+        if (!group_id) return null
+        if (!Number.isFinite(position)) return null
+        if (!teamId) return null
 
         return {
           user_id: user.id,
-          group_id, // ✅ keep as string (UUID safe)
-          team_id: Number(teamId),
+          group_id,       // ✅ UUID string
+          team_id: teamId, // ✅ UUID string
           position,
           submitted_at: now
         }
       })
       .filter(Boolean)
 
-    // Extra safety: ensure no null group_id rows
-    const bad = rows.find(r => !r.group_id)
-    if (bad) {
-      setMsg('Internal error: a pick is missing group_id. Please refresh and try again.')
+    // Safety: ensure every required slot exists in rows
+    const expected = groups.reduce((sum, g) => sum + (g?.teams?.length || 0), 0)
+    if (rows.length !== expected) {
+      setMsg('Internal error: some picks were missing. Please refresh and try again.')
       return
     }
 
@@ -266,3 +276,4 @@ export default function PicksPage() {
     </div>
   )
 }
+
