@@ -9,7 +9,7 @@ import { supabase } from '../../lib/supabaseClient'
  */
 const DEADLINE_UTC = '2026-03-11T05:00:00Z'
 
-// ✅ UUID-safe key separator (UUIDs contain "-")
+// UUID-safe key separator (UUIDs contain "-")
 const KEY_SEP = '::'
 const makeKey = (groupId, position) => `${groupId}${KEY_SEP}${position}`
 const parseKey = key => {
@@ -69,10 +69,10 @@ export default function PicksPage() {
       return
     }
 
-    // ✅ Use position (your unique constraint includes position)
+    // We load both position + rank (table currently seems to have both)
     const { data: pickData, error: pErr } = await supabase
       .from('group_picks')
-      .select('group_id, team_id, position, submitted_at')
+      .select('group_id, team_id, position, rank, submitted_at')
       .eq('user_id', auth.user.id)
 
     if (pErr) {
@@ -87,8 +87,9 @@ export default function PicksPage() {
     let sub = null
 
     ;(pickData || []).forEach(p => {
-      if (p.group_id && p.position != null) {
-        map[makeKey(p.group_id, p.position)] = p.team_id
+      const pos = p.position ?? p.rank
+      if (p.group_id && pos != null) {
+        map[makeKey(p.group_id, pos)] = p.team_id
       }
       if (p.submitted_at) sub = p.submitted_at
     })
@@ -119,9 +120,10 @@ export default function PicksPage() {
 
         return {
           user_id: user.id,
-          group_id,         // UUID safe
-          team_id: teamId,  // UUID safe (string)
-          position,
+          group_id,         // UUID string
+          team_id: teamId,  // UUID string
+          position,         // ✅ required by unique constraint
+          rank: position,   // ✅ required NOT NULL in your DB
           submitted_at: keepSubmittedAt
         }
       })
@@ -132,10 +134,9 @@ export default function PicksPage() {
       return
     }
 
-    // ✅ IMPORTANT: tell Supabase which unique key to use for conflict resolution
     const { error } = await supabase
       .from('group_picks')
-      .upsert(rows, { onConflict: 'user_id,group_id,position' })
+      .upsert(rows, { onConflict: 'user_id,group_id,position' }) // ✅ match your unique key
 
     setMsg(error ? error.message : 'Saved ✅')
   }
@@ -171,7 +172,8 @@ export default function PicksPage() {
           user_id: user.id,
           group_id,
           team_id: teamId,
-          position,
+          position,        // ✅ required by unique constraint
+          rank: position,  // ✅ satisfies NOT NULL rank constraint
           submitted_at: now
         }
       })
