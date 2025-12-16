@@ -9,14 +9,12 @@ import { supabase } from '../../lib/supabaseClient'
  */
 const DEADLINE_UTC = '2026-03-11T05:00:00Z'
 
-// ✅ Safe separator (UUIDs contain "-" so we must NOT split on "-")
+// UUID-safe key separator
 const KEY_SEP = '::'
-const makeKey = (groupId, position) => `${groupId}${KEY_SEP}${position}`
+const makeKey = (groupId, rank) => `${groupId}${KEY_SEP}${rank}`
 const parseKey = key => {
-  const parts = String(key).split(KEY_SEP)
-  const group_id = parts[0]
-  const position = Number(parts[1])
-  return { group_id, position }
+  const [group_id, rankStr] = String(key).split(KEY_SEP)
+  return { group_id, rank: Number(rankStr) }
 }
 
 export default function PicksPage() {
@@ -60,7 +58,7 @@ export default function PicksPage() {
 
     const { data: pickData, error: pErr } = await supabase
       .from('group_picks')
-      .select('group_id, team_id, position, submitted_at')
+      .select('group_id, team_id, rank, submitted_at')
       .eq('user_id', auth.user.id)
 
     if (pErr) {
@@ -75,7 +73,7 @@ export default function PicksPage() {
     let sub = null
 
     ;(pickData || []).forEach(p => {
-      map[makeKey(p.group_id, p.position)] = p.team_id
+      map[makeKey(p.group_id, p.rank)] = p.team_id
       if (p.submitted_at) sub = p.submitted_at
     })
 
@@ -93,29 +91,26 @@ export default function PicksPage() {
 
     setMsg('Saving...')
 
-    // If they've already submitted once, DO NOT clear submitted_at.
     const keepSubmittedAt = submittedAt || null
 
     const rows = Object.entries(picks)
       .map(([key, teamId]) => {
-        const { group_id, position } = parseKey(key)
+        const { group_id, rank } = parseKey(key)
 
-        // ✅ Only save complete pick slots. Draft save should NOT write null team_id.
         if (!group_id) return null
-        if (!Number.isFinite(position)) return null
-        if (!teamId) return null // covers '' / null / undefined
+        if (!Number.isFinite(rank)) return null
+        if (!teamId) return null
 
         return {
           user_id: user.id,
-          group_id,      // ✅ UUID string
-          team_id: teamId, // ✅ UUID string (do NOT Number() this)
-          position,
+          group_id,
+          team_id: teamId,
+          rank,                 // ✅ CORRECT COLUMN
           submitted_at: keepSubmittedAt
         }
       })
       .filter(Boolean)
 
-    // If nothing picked yet, don't call upsert (avoids confusing states)
     if (rows.length === 0) {
       setMsg('Pick at least one team before saving.')
       return
@@ -134,8 +129,8 @@ export default function PicksPage() {
 
     // Require full rankings before submit
     for (const g of groups) {
-      for (let pos = 1; pos <= g.teams.length; pos++) {
-        if (!picks[makeKey(g.id, pos)]) {
+      for (let r = 1; r <= g.teams.length; r++) {
+        if (!picks[makeKey(g.id, r)]) {
           setMsg('Please complete all group rankings before submitting.')
           return
         }
@@ -147,25 +142,22 @@ export default function PicksPage() {
 
     const rows = Object.entries(picks)
       .map(([key, teamId]) => {
-        const { group_id, position } = parseKey(key)
-        if (!group_id) return null
-        if (!Number.isFinite(position)) return null
-        if (!teamId) return null
+        const { group_id, rank } = parseKey(key)
+        if (!group_id || !Number.isFinite(rank) || !teamId) return null
 
         return {
           user_id: user.id,
-          group_id,       // ✅ UUID string
-          team_id: teamId, // ✅ UUID string
-          position,
+          group_id,
+          team_id: teamId,
+          rank,                // ✅ CORRECT COLUMN
           submitted_at: now
         }
       })
       .filter(Boolean)
 
-    // Safety: ensure every required slot exists in rows
-    const expected = groups.reduce((sum, g) => sum + (g?.teams?.length || 0), 0)
+    const expected = groups.reduce((sum, g) => sum + g.teams.length, 0)
     if (rows.length !== expected) {
-      setMsg('Internal error: some picks were missing. Please refresh and try again.')
+      setMsg('Internal error: some picks are missing. Please refresh and try again.')
       return
     }
 
@@ -223,7 +215,7 @@ export default function PicksPage() {
           </p>
         ) : (
           <p style={{ margin: 0, fontWeight: 800 }}>
-            ⏳ Not submitted yet — make sure you submit before the deadline (Option A).
+            ⏳ Not submitted yet — make sure you submit before the deadline.
           </p>
         )}
       </div>
@@ -236,8 +228,8 @@ export default function PicksPage() {
           <p className="cardSub">Rank teams from 1st to last</p>
 
           {group.teams.map((team, index) => {
-            const position = index + 1
-            const k = makeKey(group.id, position)
+            const rank = index + 1
+            const k = makeKey(group.id, rank)
 
             return (
               <div key={team.id} style={{ marginBottom: 8 }}>
@@ -252,7 +244,7 @@ export default function PicksPage() {
                     }))
                   }
                 >
-                  <option value="">Rank {position}</option>
+                  <option value="">Rank {rank}</option>
                   {group.teams.map(t => (
                     <option key={t.id} value={t.id}>
                       {t.name}
