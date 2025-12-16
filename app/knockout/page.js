@@ -13,19 +13,23 @@ const ROUND_LABEL = {
   F: 'Final'
 }
 
-// Expected match counts for consistent bracket spacing (even if DB has fewer rows)
 const ROUND_COUNTS = { R32: 16, R16: 8, QF: 4, SF: 2, F: 1 }
 
-// Bracket visuals (tuned for readability)
-const COL_W = 240
-const COL_GAP = 16
+/**
+ * ✅ SPACING TUNED (LESS CONGESTED)
+ * - bigger cards
+ * - bigger vertical gaps
+ * - more padTop between rounds
+ */
+const COL_W = 270
+const COL_GAP = 24
 
 const ROUND_META = {
-  R32: { matchH: 66, gap: 14, padTop: 0 },
-  R16: { matchH: 66, gap: 46, padTop: 40 },
-  QF: { matchH: 66, gap: 126, padTop: 100 },
-  SF: { matchH: 66, gap: 286, padTop: 210 },
-  F: { matchH: 66, gap: 0, padTop: 330 }
+  R32: { matchH: 86, gap: 26, padTop: 0 },
+  R16: { matchH: 86, gap: 78, padTop: 55 },
+  QF:  { matchH: 86, gap: 182, padTop: 140 },
+  SF:  { matchH: 86, gap: 390, padTop: 290 },
+  F:   { matchH: 86, gap: 0,  padTop: 520 }
 }
 
 function roundIndex(r) {
@@ -37,7 +41,7 @@ function computeRoundHeight(round) {
   const meta = ROUND_META[round]
   const count = ROUND_COUNTS[round] ?? 0
   if (!meta || count <= 0) return 0
-  return meta.padTop + count * meta.matchH + (count - 1) * meta.gap + 20
+  return meta.padTop + count * meta.matchH + (count - 1) * meta.gap + 24
 }
 
 function matchCenterY(round, idx0) {
@@ -57,7 +61,7 @@ export default function KnockoutPage() {
   const [user, setUser] = useState(null)
 
   const [matches, setMatches] = useState([])
-  const [selections, setSelections] = useState({}) // { [matchId]: teamId }
+  const [selections, setSelections] = useState({})
   const [submittedAt, setSubmittedAt] = useState(null)
 
   const [savingState, setSavingState] = useState('idle') // idle | saving | saved | submitted | error
@@ -255,20 +259,20 @@ export default function KnockoutPage() {
     const awayChosen = chosen && away?.id && chosen === String(away.id)
 
     const meta = ROUND_META[round]
-    const h = meta?.matchH ?? 66
+    const h = meta?.matchH ?? 86
 
     return (
       <div
         style={{
           height: h,
-          borderRadius: 14,
-          padding: 10,
+          borderRadius: 16,
+          padding: 12,
           background: 'rgba(255,255,255,.05)',
           border: '1px solid rgba(255,255,255,.10)',
           display: 'flex',
           flexDirection: 'column',
           justifyContent: 'center',
-          gap: 8,
+          gap: 10,
           position: 'relative',
           zIndex: 2
         }}
@@ -283,10 +287,10 @@ export default function KnockoutPage() {
           </div>
         </div>
 
-        <div style={{ display: 'grid', gap: 6 }}>
+        <div style={{ display: 'grid', gap: 8 }}>
           <div
             style={{
-              padding: '6px 10px',
+              padding: '8px 12px',
               borderRadius: 999,
               fontWeight: 900,
               background: homeChosen ? 'rgba(56,189,248,.18)' : 'rgba(0,0,0,.20)',
@@ -301,7 +305,7 @@ export default function KnockoutPage() {
 
           <div
             style={{
-              padding: '6px 10px',
+              padding: '8px 12px',
               borderRadius: 999,
               fontWeight: 900,
               background: awayChosen ? 'rgba(56,189,248,.18)' : 'rgba(0,0,0,.20)',
@@ -318,8 +322,6 @@ export default function KnockoutPage() {
     )
   }
 
-  // Build SVG connector paths between rounds based on index pairing:
-  // idx i in round -> idx floor(i/2) in next round
   const bracketSvg = useMemo(() => {
     const totalW = ROUND_ORDER.length * COL_W + (ROUND_ORDER.length - 1) * COL_GAP
     const totalH = Math.max(...ROUND_ORDER.map(r => computeRoundHeight(r)))
@@ -333,25 +335,22 @@ export default function KnockoutPage() {
       const list = matchesByRound[r] || []
       const nextList = matchesByRound[next] || []
 
-      // only draw lines if there are cards in both rounds
       if (list.length === 0 || nextList.length === 0) continue
 
       for (let i = 0; i < list.length; i++) {
         const j = Math.floor(i / 2)
         if (!nextList[j]) continue
 
-        // positions in the SVG coordinate system
         const x1 = colX(r) + COL_W
         const y1 = matchCenterY(r, i)
         const x2 = colX(next)
         const y2 = matchCenterY(next, j)
 
-        const mid1 = x1 + 18
-        const mid2 = x2 - 18
+        // longer elbow spacing now that we widened gaps
+        const mid1 = x1 + 22
+        const mid2 = x2 - 22
         const midX = (mid1 + mid2) / 2
 
-        // A clean bracket elbow path:
-        // x1->mid1 (short), mid1->midX (horizontal), midX vertical to y2, then to x2
         const d = [
           `M ${x1} ${y1}`,
           `L ${mid1} ${y1}`,
@@ -389,6 +388,9 @@ export default function KnockoutPage() {
     )
   }
 
+  // ✅ This makes BOTH sides the same height and scroll inside
+  const PANEL_HEIGHT = '78vh'
+
   return (
     <div className="container">
       <div className="nav">
@@ -400,7 +402,7 @@ export default function KnockoutPage() {
 
       <h1 className="h1" style={{ marginTop: 16 }}>Knockout Picks</h1>
       <p className="sub">
-        Pick winners on the left. Bracket preview on the right (desktop) / below (mobile). Submit locks 🔒
+        Picks list (left) + bracket preview (right). Both panels scroll and stay aligned.
       </p>
 
       {locked && (
@@ -412,13 +414,13 @@ export default function KnockoutPage() {
       {msg && <div className="badge" style={{ marginTop: 10 }}>{msg}</div>}
 
       <div className="koGrid" style={{ marginTop: 16 }}>
-        {/* LEFT: Picks */}
-        <div className="card" style={{ padding: 14 }}>
+        {/* LEFT */}
+        <div className="card" style={{ padding: 14, height: PANEL_HEIGHT, display: 'flex', flexDirection: 'column' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, alignItems: 'baseline' }}>
             <div>
               <div style={{ fontWeight: 900, fontSize: 16 }}>Pick Winners</div>
               <div style={{ fontSize: 12, opacity: 0.8, fontWeight: 800 }}>
-                Tap a team to select. (Teams must be set by admin.)
+                Tap a team to select. Scroll inside this panel.
               </div>
             </div>
             <div style={{ fontSize: 12, opacity: 0.75, fontWeight: 900 }}>
@@ -426,78 +428,80 @@ export default function KnockoutPage() {
             </div>
           </div>
 
-          {ROUND_ORDER.map(r => (
-            <div key={r} style={{ marginTop: 14 }}>
-              <div style={{ fontWeight: 900, marginBottom: 8 }}>{ROUND_LABEL[r]}</div>
+          <div style={{ marginTop: 12, overflowY: 'auto', paddingRight: 6 }}>
+            {ROUND_ORDER.map(r => (
+              <div key={r} style={{ marginTop: 14 }}>
+                <div style={{ fontWeight: 900, marginBottom: 8 }}>{ROUND_LABEL[r]}</div>
 
-              {(matchesByRound[r] ?? []).length === 0 ? (
-                <div style={{ opacity: 0.75, fontWeight: 800, fontSize: 12 }}>
-                  No matches posted yet.
-                </div>
-              ) : (
-                <div style={{ display: 'grid', gap: 10 }}>
-                  {(matchesByRound[r] ?? []).map(m => {
-                    const home = m.home
-                    const away = m.away
-                    const canPick = !!(home?.id && away?.id)
-                    const chosen = selections[m.id] ? String(selections[m.id]) : ''
-                    const homeChosen = chosen && home?.id && chosen === String(home.id)
-                    const awayChosen = chosen && away?.id && chosen === String(away.id)
+                {(matchesByRound[r] ?? []).length === 0 ? (
+                  <div style={{ opacity: 0.75, fontWeight: 800, fontSize: 12 }}>
+                    No matches posted yet.
+                  </div>
+                ) : (
+                  <div style={{ display: 'grid', gap: 10 }}>
+                    {(matchesByRound[r] ?? []).map(m => {
+                      const home = m.home
+                      const away = m.away
+                      const canPick = !!(home?.id && away?.id)
+                      const chosen = selections[m.id] ? String(selections[m.id]) : ''
+                      const homeChosen = chosen && home?.id && chosen === String(home.id)
+                      const awayChosen = chosen && away?.id && chosen === String(away.id)
 
-                    return (
-                      <div
-                        key={m.id}
-                        style={{
-                          padding: 12,
-                          borderRadius: 14,
-                          background: 'rgba(255,255,255,.04)',
-                          border: '1px solid rgba(255,255,255,.08)'
-                        }}
-                      >
-                        <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, alignItems: 'baseline' }}>
-                          <div style={{ fontSize: 12, opacity: 0.75, fontWeight: 900 }}>
-                            Match {m.match_no}
+                      return (
+                        <div
+                          key={m.id}
+                          style={{
+                            padding: 12,
+                            borderRadius: 14,
+                            background: 'rgba(255,255,255,.04)',
+                            border: '1px solid rgba(255,255,255,.08)'
+                          }}
+                        >
+                          <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, alignItems: 'baseline' }}>
+                            <div style={{ fontSize: 12, opacity: 0.75, fontWeight: 900 }}>
+                              Match {m.match_no}
+                            </div>
+                            {m.is_final && (
+                              <div style={{ fontSize: 12, opacity: 0.9, fontWeight: 900 }}>
+                                ✅ Final
+                              </div>
+                            )}
                           </div>
-                          {m.is_final && (
-                            <div style={{ fontSize: 12, opacity: 0.9, fontWeight: 900 }}>
-                              ✅ Final
+
+                          <div style={{ marginTop: 6, fontWeight: 900 }}>
+                            {home?.name ?? 'TBD'} vs {away?.name ?? 'TBD'}
+                          </div>
+
+                          {!canPick && (
+                            <div style={{ marginTop: 8, fontSize: 12, opacity: 0.75, fontWeight: 800 }}>
+                              Teams not set yet by admin.
                             </div>
                           )}
-                        </div>
 
-                        <div style={{ marginTop: 6, fontWeight: 900 }}>
-                          {home?.name ?? 'TBD'} vs {away?.name ?? 'TBD'}
-                        </div>
-
-                        {!canPick && (
-                          <div style={{ marginTop: 8, fontSize: 12, opacity: 0.75, fontWeight: 800 }}>
-                            Teams not set yet by admin.
+                          <div style={{ marginTop: 10, display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                            <TeamPickButton
+                              disabled={locked || !canPick}
+                              active={homeChosen}
+                              label={home?.name ?? 'TBD'}
+                              onClick={() => pick(m.id, home.id)}
+                            />
+                            <TeamPickButton
+                              disabled={locked || !canPick}
+                              active={awayChosen}
+                              label={away?.name ?? 'TBD'}
+                              onClick={() => pick(m.id, away.id)}
+                            />
                           </div>
-                        )}
-
-                        <div style={{ marginTop: 10, display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
-                          <TeamPickButton
-                            disabled={locked || !canPick}
-                            active={homeChosen}
-                            label={home?.name ?? 'TBD'}
-                            onClick={() => pick(m.id, home.id)}
-                          />
-                          <TeamPickButton
-                            disabled={locked || !canPick}
-                            active={awayChosen}
-                            label={away?.name ?? 'TBD'}
-                            onClick={() => pick(m.id, away.id)}
-                          />
                         </div>
-                      </div>
-                    )
-                  })}
-                </div>
-              )}
-            </div>
-          ))}
+                      )
+                    })}
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
 
-          <div style={{ marginTop: 16, display: 'flex', gap: 12, flexWrap: 'wrap' }}>
+          <div style={{ marginTop: 14, display: 'flex', gap: 12, flexWrap: 'wrap' }}>
             <button
               className={`btn ${savingState === 'saving' ? 'btnLocked' : ''} ${savingState === 'saved' ? 'btnGlow' : ''}`}
               disabled={locked || savingState === 'saving'}
@@ -530,13 +534,13 @@ export default function KnockoutPage() {
           </div>
         </div>
 
-        {/* RIGHT: Bracket Preview + Connector Lines */}
-        <div className="card" style={{ padding: 14 }}>
+        {/* RIGHT */}
+        <div className="card" style={{ padding: 14, height: PANEL_HEIGHT, display: 'flex', flexDirection: 'column' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, alignItems: 'baseline' }}>
             <div>
               <div style={{ fontWeight: 900, fontSize: 16 }}>Bracket Preview</div>
               <div style={{ fontSize: 12, opacity: 0.8, fontWeight: 800 }}>
-                Connector lines included — updates as you pick.
+                More spacing + connector lines. Scroll inside this panel.
               </div>
             </div>
             <div style={{ fontSize: 12, opacity: 0.75, fontWeight: 900 }}>
@@ -544,7 +548,7 @@ export default function KnockoutPage() {
             </div>
           </div>
 
-          <div style={{ marginTop: 12, overflowX: 'auto', paddingBottom: 8 }}>
+          <div style={{ marginTop: 12, overflow: 'auto', paddingBottom: 8 }}>
             <div
               style={{
                 position: 'relative',
@@ -553,7 +557,6 @@ export default function KnockoutPage() {
                 paddingBottom: 10
               }}
             >
-              {/* SVG connector lines (behind cards) */}
               <svg
                 width={bracketSvg.totalW}
                 height={bracketSvg.totalH}
@@ -570,7 +573,7 @@ export default function KnockoutPage() {
                     key={idx}
                     d={d}
                     fill="none"
-                    stroke="rgba(255,255,255,.16)"
+                    stroke="rgba(255,255,255,.14)"
                     strokeWidth="2"
                     strokeLinecap="round"
                     strokeLinejoin="round"
@@ -578,15 +581,14 @@ export default function KnockoutPage() {
                 ))}
               </svg>
 
-              {/* Columns + cards */}
               <div style={{ position: 'relative', zIndex: 2, display: 'flex', gap: COL_GAP }}>
                 {ROUND_ORDER.map(r => {
                   const list = matchesByRound[r] ?? []
-                  const meta = ROUND_META[r] || { matchH: 66, gap: 16, padTop: 0 }
+                  const meta = ROUND_META[r] || { matchH: 86, gap: 26, padTop: 0 }
 
                   return (
                     <div key={r} style={{ width: COL_W }}>
-                      <div style={{ fontWeight: 900, marginBottom: 10 }}>{ROUND_LABEL[r]}</div>
+                      <div style={{ fontWeight: 900, marginBottom: 12 }}>{ROUND_LABEL[r]}</div>
 
                       <div style={{ paddingTop: meta.padTop }}>
                         {list.length === 0 ? (
@@ -609,7 +611,7 @@ export default function KnockoutPage() {
           </div>
 
           <div style={{ marginTop: 10, fontSize: 12, opacity: 0.75, fontWeight: 800 }}>
-            Want it even closer to your reference image? Next step is drawing the “join bars” (little brackets) between pairs.
+            If you want even MORE space, we can bump match height + gaps again.
           </div>
         </div>
       </div>
@@ -622,7 +624,7 @@ export default function KnockoutPage() {
         }
         @media (min-width: 1024px) {
           .koGrid {
-            grid-template-columns: 1.1fr 0.9fr;
+            grid-template-columns: 1.05fr 0.95fr;
             align-items: start;
           }
         }
