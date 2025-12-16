@@ -45,8 +45,7 @@ export default function PicksPage() {
   const rafRef = useRef(null)
 
   // Mobile tap-to-move state
-  // { groupId, fromIndex } means "picked up" item
-  const [tapPick, setTapPick] = useState(null)
+  const [tapPick, setTapPick] = useState(null) // { groupId, fromIndex } or null
 
   // Little "flash" animation after drop/move
   const [flashKey, setFlashKey] = useState(null)
@@ -58,7 +57,6 @@ export default function PicksPage() {
   }, [])
 
   useEffect(() => {
-    // cleanup
     return () => {
       if (rafRef.current) cancelAnimationFrame(rafRef.current)
       if (flashTimerRef.current) clearTimeout(flashTimerRef.current)
@@ -132,7 +130,7 @@ export default function PicksPage() {
 
   // Build an ordered list of team IDs for a group:
   // 1) Use saved picks order (1..n) if present
-  // 2) Append any missing teams (so list always contains all teams exactly once)
+  // 2) Append missing teams so list always contains all teams exactly once
   function getOrderForGroup(group) {
     const groupId = group.id
     const n = group?.teams?.length || 0
@@ -154,7 +152,7 @@ export default function PicksPage() {
   function applyOrderToPicks(groupId, orderIds) {
     setPicks(prev => {
       const next = { ...prev }
-      // Clear existing keys for this group (prevents stale duplicates)
+      // Clear existing keys for this group
       for (let i = 1; i <= 50; i++) {
         const k = makeKey(groupId, i)
         if (k in next) delete next[k]
@@ -173,6 +171,9 @@ export default function PicksPage() {
     flashTimerRef.current = setTimeout(() => setFlashKey(null), 380)
   }
 
+  // ✅ FIXED SAVE STRATEGY:
+  // Your DB has UNIQUE(user_id, group_id, team_id), so upsert-by-position can collide during reorders.
+  // Solution: delete all existing picks for this user, then insert the full set.
   async function saveDraft() {
     if (!user) return
     if (locked) {
@@ -184,6 +185,13 @@ export default function PicksPage() {
 
     const keepSubmittedAt = submittedAt || null
 
+    // Delete existing picks first
+    const delRes = await supabase.from('group_picks').delete().eq('user_id', user.id)
+    if (delRes.error) {
+      setMsg(delRes.error.message)
+      return
+    }
+
     const rows = Object.entries(picks)
       .map(([key, teamId]) => {
         const { group_id, position } = parseKey(key)
@@ -194,9 +202,9 @@ export default function PicksPage() {
         return {
           user_id: user.id,
           group_id,
-          team_id: teamId, // UUID string
+          team_id: teamId,
           position,
-          rank: position, // satisfy NOT NULL rank too
+          rank: position,
           submitted_at: keepSubmittedAt
         }
       })
@@ -207,13 +215,16 @@ export default function PicksPage() {
       return
     }
 
-    const { error } = await supabase
-      .from('group_picks')
-      .upsert(rows, { onConflict: 'user_id,group_id,position' })
+    const insRes = await supabase.from('group_picks').insert(rows)
+    if (insRes.error) {
+      setMsg(insRes.error.message)
+      return
+    }
 
-    setMsg(error ? error.message : 'Saved ✅')
+    setMsg('Saved ✅')
   }
 
+  // ✅ FIXED SUBMIT STRATEGY: delete then insert (with submitted_at set)
   async function submit() {
     if (!user) return
     if (locked) {
@@ -233,6 +244,12 @@ export default function PicksPage() {
 
     const now = new Date().toISOString()
     setMsg('Submitting...')
+
+    const delRes = await supabase.from('group_picks').delete().eq('user_id', user.id)
+    if (delRes.error) {
+      setMsg(delRes.error.message)
+      return
+    }
 
     const rows = Object.entries(picks)
       .map(([key, teamId]) => {
@@ -258,12 +275,9 @@ export default function PicksPage() {
       return
     }
 
-    const { error } = await supabase
-      .from('group_picks')
-      .upsert(rows, { onConflict: 'user_id,group_id,position' })
-
-    if (error) {
-      setMsg(error.message)
+    const insRes = await supabase.from('group_picks').insert(rows)
+    if (insRes.error) {
+      setMsg(insRes.error.message)
       return
     }
 
@@ -293,7 +307,7 @@ export default function PicksPage() {
       if (el) {
         const rect = el.getBoundingClientRect()
         const y = autoScrollRef.current.lastY
-        const edge = 80 // px
+        const edge = 80
         const maxSpeed = 18
 
         let delta = 0
@@ -327,7 +341,6 @@ export default function PicksPage() {
   // ---------- DRAG HANDLERS ----------
   function onDragStart(groupId, fromIndex) {
     dragFromRef.current = { groupId, fromIndex }
-    // when dragging, clear tap mode
     setTapPick(null)
   }
 
@@ -364,30 +377,26 @@ export default function PicksPage() {
   function onTapItem(group, index) {
     if (locked) return
 
-    // If nothing selected, pick it up
     if (!tapPick) {
       setTapPick({ groupId: group.id, fromIndex: index })
       return
     }
 
-    // If different group, switch to new pick-up
     if (tapPick.groupId !== group.id) {
       setTapPick({ groupId: group.id, fromIndex: index })
       return
     }
 
-    // If tapping the same item, cancel
     if (tapPick.fromIndex === index) {
       setTapPick(null)
       return
     }
 
-    // Drop onto tapped index
     const order = getOrderForGroup(group)
     const moved = arrayMove(order, tapPick.fromIndex, index)
     applyOrderToPicks(group.id, moved)
     flash(group.id, index)
-    setTapPick({ groupId: group.id, fromIndex: index }) // keep "holding" the moved item (feels fast)
+    setTapPick({ groupId: group.id, fromIndex: index })
   }
 
   function moveUp(group, index) {
@@ -423,7 +432,7 @@ export default function PicksPage() {
 
       <h1 className="h1" style={{ marginTop: 14 }}>Group Picks</h1>
       <p className="sub">
-        Drag teams to rank them. On mobile you can also tap a team, then tap where to drop it. Deadline:{' '}
+        Drag teams to rank them. On mobile: tap a team, then tap where to drop it. Deadline:{' '}
         <strong>{deadlineLabelEST()}</strong>
       </p>
 
@@ -449,7 +458,6 @@ export default function PicksPage() {
 
       {msg && <p style={{ marginTop: 10 }}>{msg}</p>}
 
-      {/* Scroll container used for auto-scroll while dragging */}
       <div
         ref={scrollRef}
         style={{
@@ -606,4 +614,3 @@ export default function PicksPage() {
     </div>
   )
 }
-
