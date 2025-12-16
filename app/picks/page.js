@@ -9,9 +9,9 @@ import { supabase } from '../../lib/supabaseClient'
  */
 const DEADLINE_UTC = '2026-03-11T05:00:00Z'
 
-// UUID-safe key separator (UUIDs contain "-")
+// ✅ UUID-safe key separator (UUIDs contain "-")
 const KEY_SEP = '::'
-const makeKey = (groupId, pos) => `${groupId}${KEY_SEP}${pos}`
+const makeKey = (groupId, position) => `${groupId}${KEY_SEP}${position}`
 const parseKey = key => {
   const [group_id, posStr] = String(key).split(KEY_SEP)
   return { group_id, position: Number(posStr) }
@@ -69,10 +69,10 @@ export default function PicksPage() {
       return
     }
 
-    // Select * so it works regardless of schema (rank/position)
+    // ✅ Use position (your unique constraint includes position)
     const { data: pickData, error: pErr } = await supabase
       .from('group_picks')
-      .select('*')
+      .select('group_id, team_id, position, submitted_at')
       .eq('user_id', auth.user.id)
 
     if (pErr) {
@@ -87,9 +87,8 @@ export default function PicksPage() {
     let sub = null
 
     ;(pickData || []).forEach(p => {
-      const pos = p.position ?? p.rank
-      if (p.group_id && pos != null) {
-        map[makeKey(p.group_id, pos)] = p.team_id
+      if (p.group_id && p.position != null) {
+        map[makeKey(p.group_id, p.position)] = p.team_id
       }
       if (p.submitted_at) sub = p.submitted_at
     })
@@ -97,65 +96,6 @@ export default function PicksPage() {
     setPicks(map)
     setSubmittedAt(sub)
     setLoading(false)
-  }
-
-  /**
-   * ✅ Ultra-robust upsert:
-   * 1) Try sending BOTH {rank, position}
-   * 2) If one column doesn't exist, retry with the other
-   */
-  async function upsertGroupPicks(rows) {
-    const baseRows = rows.map(r => ({
-      user_id: r.user_id,
-      group_id: r.group_id,
-      team_id: r.team_id,
-      submitted_at: r.submitted_at
-    }))
-
-    // Attempt 1: send BOTH columns (best if both exist or both are NOT NULL)
-    {
-      const payload = baseRows.map((b, i) => ({
-        ...b,
-        position: rows[i].position,
-        rank: rows[i].position
-      }))
-      const { error } = await supabase.from('group_picks').upsert(payload)
-      if (!error) return { ok: true, used: 'both' }
-
-      const msg = String(error.message || '').toLowerCase()
-      const posMissing = msg.includes('column') && msg.includes('position') && msg.includes('does not exist')
-      const rankMissing = msg.includes('column') && msg.includes('rank') && msg.includes('does not exist')
-
-      // If neither column is missing, it's a real error (RLS, nulls, etc.)
-      // We'll still fall through to try single-col attempts ONLY if one is missing.
-      if (!posMissing && !rankMissing) return { ok: false, error }
-      // else continue to single-col attempts
-    }
-
-    // Attempt 2: rank only
-    {
-      const payload = baseRows.map((b, i) => ({
-        ...b,
-        rank: rows[i].position
-      }))
-      const { error } = await supabase.from('group_picks').upsert(payload)
-      if (!error) return { ok: true, used: 'rank' }
-
-      const msg = String(error.message || '').toLowerCase()
-      const rankMissing = msg.includes('column') && msg.includes('rank') && msg.includes('does not exist')
-      if (!rankMissing) return { ok: false, error }
-    }
-
-    // Attempt 3: position only
-    {
-      const payload = baseRows.map((b, i) => ({
-        ...b,
-        position: rows[i].position
-      }))
-      const { error } = await supabase.from('group_picks').upsert(payload)
-      if (!error) return { ok: true, used: 'position' }
-      return { ok: false, error }
-    }
   }
 
   async function saveDraft() {
@@ -167,7 +107,7 @@ export default function PicksPage() {
 
     setMsg('Saving...')
 
-    // If already submitted, keep it (don’t “unsubmit” on save)
+    // If already submitted, keep submitted_at (don’t “unsubmit” on save)
     const keepSubmittedAt = submittedAt || null
 
     const rows = Object.entries(picks)
@@ -179,8 +119,8 @@ export default function PicksPage() {
 
         return {
           user_id: user.id,
-          group_id,      // UUID safe
-          team_id: teamId, // UUID safe
+          group_id,         // UUID safe
+          team_id: teamId,  // UUID safe (string)
           position,
           submitted_at: keepSubmittedAt
         }
@@ -192,13 +132,12 @@ export default function PicksPage() {
       return
     }
 
-    const res = await upsertGroupPicks(rows)
-    if (!res.ok) {
-      setMsg(res.error?.message || 'Save failed.')
-      return
-    }
+    // ✅ IMPORTANT: tell Supabase which unique key to use for conflict resolution
+    const { error } = await supabase
+      .from('group_picks')
+      .upsert(rows, { onConflict: 'user_id,group_id,position' })
 
-    setMsg('Saved ✅')
+    setMsg(error ? error.message : 'Saved ✅')
   }
 
   async function submit() {
@@ -244,9 +183,12 @@ export default function PicksPage() {
       return
     }
 
-    const res = await upsertGroupPicks(rows)
-    if (!res.ok) {
-      setMsg(res.error?.message || 'Submit failed.')
+    const { error } = await supabase
+      .from('group_picks')
+      .upsert(rows, { onConflict: 'user_id,group_id,position' })
+
+    if (error) {
+      setMsg(error.message)
       return
     }
 
@@ -298,8 +240,8 @@ export default function PicksPage() {
           <p className="cardSub">Rank teams from 1st to last</p>
 
           {group.teams.map((team, index) => {
-            const pos = index + 1
-            const k = makeKey(group.id, pos)
+            const position = index + 1
+            const k = makeKey(group.id, position)
 
             return (
               <div key={team.id} style={{ marginBottom: 8 }}>
@@ -314,7 +256,7 @@ export default function PicksPage() {
                     }))
                   }
                 >
-                  <option value="">Rank {pos}</option>
+                  <option value="">Rank {position}</option>
                   {group.teams.map(t => (
                     <option key={t.id} value={t.id}>
                       {t.name}
