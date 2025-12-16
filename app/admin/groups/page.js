@@ -1,7 +1,7 @@
 'use client'
 export const dynamic = 'force-dynamic'
 
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { supabase } from '../../../lib/supabaseClient'
 
 export default function AdminGroupsPage() {
@@ -13,9 +13,6 @@ export default function AdminGroupsPage() {
 
   const [loading, setLoading] = useState(true)
   const [msg, setMsg] = useState('')
-
-  // Track the "last saved" scores so ESC can revert drafts cleanly
-  const savedScoresRef = useRef({}) // { [matchId]: { home:'', away:'' } }
 
   useEffect(() => {
     ;(async () => {
@@ -73,7 +70,7 @@ export default function AdminGroupsPage() {
         home:home_team_id ( name ),
         away:away_team_id ( name )
       `)
-      // ✅ IMPORTANT: stable ordering prevents "random shuffle"
+      // ✅ stable ordering prevents shuffle/jump
       .order('group_id', { ascending: true })
       .order('id', { ascending: true })
 
@@ -85,25 +82,23 @@ export default function AdminGroupsPage() {
     const rows = data ?? []
     setMatches(rows)
 
-    // Initialize / update drafts & saved snapshot
+    // only initialize drafts for matches that don't have a draft yet
     setDraftScores(prev => {
       const next = { ...prev }
-
       for (const m of rows) {
-        const homeStr =
-          m.home_score === null || m.home_score === undefined ? '' : String(m.home_score)
-        const awayStr =
-          m.away_score === null || m.away_score === undefined ? '' : String(m.away_score)
-
-        // saved snapshot always refreshes from DB (for ESC revert)
-        savedScoresRef.current[m.id] = { home: homeStr, away: awayStr }
-
-        // only initialize drafts for matches that don't have a draft yet
         if (!next[m.id]) {
-          next[m.id] = { home: homeStr, away: awayStr }
+          next[m.id] = {
+            home:
+              m.home_score === null || m.home_score === undefined
+                ? ''
+                : String(m.home_score),
+            away:
+              m.away_score === null || m.away_score === undefined
+                ? ''
+                : String(m.away_score)
+          }
         }
       }
-
       return next
     })
   }
@@ -115,15 +110,6 @@ export default function AdminGroupsPage() {
       ...prev,
       [matchId]: { ...(prev[matchId] ?? { home: '', away: '' }), [side]: value }
     }))
-  }
-
-  function revertDraft(matchId) {
-    const saved = savedScoresRef.current[matchId] ?? { home: '', away: '' }
-    setDraftScores(prev => ({
-      ...prev,
-      [matchId]: { home: saved.home ?? '', away: saved.away ?? '' }
-    }))
-    setMsg('Reverted (ESC) ✅')
   }
 
   async function saveMatch(matchId) {
@@ -141,7 +127,7 @@ export default function AdminGroupsPage() {
 
     if (error) {
       setMsg(`Save failed: ${error.message}`)
-      return false
+      return
     }
 
     // update local only (no reorder/jump)
@@ -151,14 +137,7 @@ export default function AdminGroupsPage() {
       )
     )
 
-    // update saved snapshot so ESC reverts to the new saved values
-    savedScoresRef.current[matchId] = {
-      home: homeVal === null ? '' : String(homeVal),
-      away: awayVal === null ? '' : String(awayVal)
-    }
-
     setMsg('Saved ✅ (Standings update after Finalize.)')
-    return true
   }
 
   function computeWinnerLabel(m, draft) {
@@ -179,9 +158,7 @@ export default function AdminGroupsPage() {
       return
     }
 
-    // Save first to ensure DB has scores
-    const savedOk = await saveMatch(matchId)
-    if (!savedOk) return
+    await saveMatch(matchId)
 
     setMsg('Finalizing…')
     const { error } = await supabase
@@ -212,34 +189,6 @@ export default function AdminGroupsPage() {
 
     setMatches(prev => prev.map(x => (x.id === matchId ? { ...x, is_final: false } : x)))
     setMsg('Unfinalized ✅')
-  }
-
-  // Keyboard workflow:
-  // - Enter on Away input -> Save
-  // - Ctrl/Cmd + Enter on Away input -> Finalize
-  // - ESC -> revert to last saved DB values
-  function onScoreKeyDown(e, matchId, side, isFinal) {
-    if (isFinal) return
-
-    if (e.key === 'Escape') {
-      e.preventDefault()
-      revertDraft(matchId)
-      return
-    }
-
-    if (e.key === 'Enter') {
-      e.preventDefault()
-
-      // Only trigger actions from the AWAY input (so Home Enter doesn't double-trigger)
-      if (side !== 'away') return
-
-      const isAccelFinalize = e.ctrlKey || e.metaKey
-      if (isAccelFinalize) {
-        finalizeMatch(matchId)
-      } else {
-        saveMatch(matchId)
-      }
-    }
   }
 
   const grouped = useMemo(() => {
@@ -286,10 +235,6 @@ export default function AdminGroupsPage() {
       <h1 className="h1" style={{ marginTop: 16 }}>Admin — Group Stage</h1>
       <p className="sub">
         Type scores → <b>Save</b>. Standings update only after <b>Finalize</b>. Draws allowed.
-        <br />
-        <span style={{ opacity: 0.85 }}>
-          Keyboard: <b>Enter</b> (on Away) = Save • <b>Ctrl/Cmd+Enter</b> (on Away) = Finalize • <b>Esc</b> = Revert
-        </span>
       </p>
 
       {msg && <div className="badge" style={{ marginTop: 10 }}>{msg}</div>}
@@ -305,6 +250,8 @@ export default function AdminGroupsPage() {
               const draft = draftScores[m.id] ?? { home: '', away: '' }
               const winner = computeWinnerLabel(m, draft)
 
+              const sameTeam = m.home_team_id && m.away_team_id && m.home_team_id === m.away_team_id
+
               return (
                 <div
                   key={m.id}
@@ -318,9 +265,20 @@ export default function AdminGroupsPage() {
                   <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}>
                     <div style={{ fontWeight: 900 }}>
                       {m.home?.name} vs {m.away?.name}{' '}
-                      {m.is_final && <span style={{ marginLeft: 8 }}>✅ <span style={{ opacity: 0.9 }}>Final</span></span>}
+                      {m.is_final && (
+                        <span style={{ marginLeft: 8 }}>
+                          ✅ <span style={{ opacity: 0.9 }}>Final</span>
+                        </span>
+                      )}
                     </div>
                   </div>
+
+                  {/* ✅ Group-stage "no duplicates" rule (B): block same team on both sides (inform + highlight) */}
+                  {sameTeam && (
+                    <div style={{ marginTop: 10, fontWeight: 900, color: '#f87171' }}>
+                      ⚠️ Home and away cannot be the same team for a match.
+                    </div>
+                  )}
 
                   <div
                     style={{
@@ -338,7 +296,6 @@ export default function AdminGroupsPage() {
                       value={draft.home}
                       disabled={m.is_final}
                       onChange={e => setDraft(m.id, 'home', e.target.value)}
-                      onKeyDown={e => onScoreKeyDown(e, m.id, 'home', m.is_final)}
                     />
 
                     <input
@@ -348,7 +305,6 @@ export default function AdminGroupsPage() {
                       value={draft.away}
                       disabled={m.is_final}
                       onChange={e => setDraft(m.id, 'away', e.target.value)}
-                      onKeyDown={e => onScoreKeyDown(e, m.id, 'away', m.is_final)}
                     />
 
                     <div style={{ display: 'flex', gap: 8 }}>
